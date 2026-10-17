@@ -55,6 +55,7 @@
   "stale_hours": 24,
   "watch_grace_minutes": 30,
   "lesson_examples": 5,
+  "repeat_minutes": 30,
   "accept_issues_from_others": false,
   "texts": {
     "take": "taking this.",

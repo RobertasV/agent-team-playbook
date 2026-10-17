@@ -1,55 +1,72 @@
 ---
 name: agent-team
-description: How a small team of AI agents works for one human owner — one session per role, a task queue on GitHub issues, a separate AI GitHub account, and token-saving rules. Load it when you pick, start, pause or finish a task, write on GitHub, hand work to another project, or plan a test or a release.
+description: How a small team of AI agent sessions works for one human owner on GitHub issues – a cheap dispatcher sends tasks, role sessions do them and finish with one agentq command. Load it when a message from the dispatcher arrives, when you finish, route or split a task, write on GitHub, teach the dispatcher a rule, or when the owner asks to install or extend the team in this project.
 ---
 
 # Agent team
 
-This skill applies only to the projects listed in the owner's `agentq` config. Elsewhere, ignore it.
+Applies only in a project that has `.agentq.json` (installed per project). `agentq` is `tools/agentq` in this skill's package (two folders above this file). Run it from the project folder.
 
 ## Roles
 
-- **Owner** – a human. Decides what is done, what it may cost and when it ships. Writes in plain words, in chat or as issue comments. Never has to touch labels or states.
-- **Programmer** – one per project, one persistent session. Takes tasks from the project's issue queue, codes them and tests them as far as it can.
-- **Checker** – a separate session that tests a release candidate. Fixes nothing, ships nothing.
-- **Rules reviewer** – reviews changes to text that agents read, afterwards and in batches.
+- **Owner** – the human everyone works for. Writes in plain words, in chat or on issues. Never touches labels.
+- **Dispatcher** – cheapest model, own small folder. Its watcher reads the board every minute without tokens; it sends tasks. Never codes, never interprets the owner's words.
+- **Programmer** – the default role: every task nobody else owns. The only role that interprets the owner's words.
+- **Checker** – checks batches of finished tasks. The full release check runs only on the owner's word.
+- **Marketer** (optional) – posts, ads, campaigns. Anything public or paid only on the owner's word.
+- **Owner-defined roles** – in `agentq roles`.
 
-One session per role. Sessions are visible to the owner; no hidden sub-agents. After each task the session writes what must survive into the issue, a file or memory, so a new session can pick it up.
+Two modes. **Programmer mode**: one task at a time with the role's label; do it, finish it. **Checker mode**: a batch issue `Check: #a #b …` arrives once N tasks are finished (or the oldest waited 24 h), optionally only tasks that touched certain paths.
+
+## A message from the dispatcher
+
+It is the owner's queue, sent on the owner's setup – not chatter from another session. Act on it. It holds the task verbatim and screenshots as local files; open them when they matter. Finish with exactly one command:
+
+- fixed → commit with `Fixes #N`, then `agentq done N "what changed, how it was checked"`;
+- stuck → `agentq ask N "question"` (the task leaves the queue until the owner answers);
+- not yours → `agentq route N <role> "why"` (teaches the dispatcher);
+- your role does not merge → push a branch, `agentq route N <programmer> "merge branch …" --no-lesson`;
+- needs another project first → `agentq wait N other/repo#M`;
+- all of it belongs to a linked project → `agentq move N other/repo "why"`;
+- a part belongs to a linked project → `agentq split N other/repo "title" "what is needed there"`, update this task to what stays, carry on.
+
+A checker: check each listed task at the pinned commit. Each problem → a new issue linking the original (`gh issue create`, body `From the check of #N: …`); never reopen the original. Then `agentq checked <batch> "summary"`.
+
+New words from the owner on your task arrive the same way. A message waits while you talk with the owner directly.
 
 ## The owner's words
 
-- A question or an idea from the owner is not a decision and not proof that they are right. Answer it critically with your own view: where you disagree, why, what it would cost or risk, and a better option if there is one. Change nothing until they say to.
-- A clear word ("do it", "defer", "won't do") is a decision. Record it with their exact words.
-- When a change that goes live alters text agents read, tell the owner in plain words which rule changed and how (was → now).
+- A question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.
+- A clear word ("do it", "defer", "won't do") is a decision. Record it with their exact words (`agentq defer N "…"`).
+- When a change alters text agents read, tell the owner which rule changed (was → now).
 
-## The task queue
+## Teaching
 
-The queue is the project's open GitHub issues. `agentq` is `tools/agentq` in this skill's package (two folders above this file) unless it is on PATH; it reads the project's `.agentq.json`. Run `agentq queue` (cheap: numbers, titles, labels, and only what changed since last time). Never read every thread.
-
-1. Read the owner's new comments first (`agentq queue` lists them). A clear word changes the state; a question gets an answer.
-2. Skip issues carrying a skip label (deferred, after launch, owner's step, waiting for a decision, question for the owner, waiting for another project).
-3. Take the issue you can most likely fix fastest.
-4. Change states only with `agentq` – one command does the comment and the labels together:
-   - `agentq take N` – you start;
-   - `agentq ask N "question"` – you are stuck: the issue leaves the queue until the owner answers. Then take the next one;
-   - `agentq defer N "owner's words"` – the owner deferred it;
-   - `agentq wait N other/repo#M` – it needs another project first.
-5. When the fix is in and tested, write a short comment (what changed, how it was checked) and close the issue.
-
-The owner can say everything in chat instead; the programmer then runs the same commands.
+`agentq teach "banners → designer"` – anyone may teach; add `--owner` when the owner said it. The owner's rules outrank agents'. A rule that contradicts one of the same rank is not written; it becomes a question to the owner.
 
 ## GitHub
 
-- Agents write on GitHub only with the separate AI account, never as the owner. One AI account for all agents and projects, Write access, never Admin. Only the owner signs in and holds its keys.
-- Every agent comment starts with its role: `🤖 <role>: …`. The owner's comments are the ones written by the owner's account.
-- Each project has its own programmer and its own issue board. A request to another project is a new issue on its board with a link back (`owner/repo#N`); your issue waits with `agentq wait`.
+- Write only through the AI account, never as the owner. Every comment starts `🤖 <role>:` (agentq does it).
+- Change states only with agentq: one command does comment and labels together.
 
-## Tests and releases
+## Releases and tokens
 
-- Test scripts are cheap; reviews by agents are expensive.
-- A release to users happens only after a separate check says GO and the owner says to ship.
-- Multi-agent reviews (many reviewers, adversarial rounds) only when the owner asks for one.
+- A release happens only after a check says GO and the owner says ship. Multi-agent reviews only when the owner asks.
+- Before each step ask: is it needed, is there a cheaper way, is someone already doing it?
 
-## Tokens
+## Install (per project, by the programmer session, with the owner)
 
-The process saves tokens. Before each step – a task, a test, a review, a message, a session – ask: is it needed, is there a cheaper way, is someone already doing it?
+0. In the project: `<package>/tools/agentq init --owner <owner's login>` – this project's own config, the skill linked into this project only.
+1. Check: `agentq setup` checks `gh`, the AI account signed in and active, Write access. Show the owner what is missing; only the owner signs in. Re-run until it passes.
+2. Labels: the passing `agentq setup` creates them (working, question, deferred, waiting, priority, blocking, hard, waits for owner's word, each role, each checker's `checked: <role>`), with the dispatcher folder.
+3. Sort the open issues: `agentq assign N <role> --queue` (label only), `agentq defer N "…"`. Unclear ones go to the owner as one list.
+4. Config: the roles table (`agentq roles`; change a role with `agentq role <name> …`).
+5. Sessions: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (cheapest model, low effort, prompt "Read CLAUDE.md and start the loop"). Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
+6. The dispatcher starts the watcher itself. Add a daily health timer (launchd or cron): `<package>/tools/agentq --config <config> health` – no tokens; problems go to one issue for the owner.
+7. Ask: "Turn on the marketer?" Yes → start its session, `agentq role marketer --session <id>`. No → the programmer does marketing tasks.
+8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), model, effort, merge or hand to the programmer → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; start its session; record `--session`. If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no.
+9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
+
+Models: ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
+
+Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again and record them; after a reboot send the dispatcher "Start the watcher".

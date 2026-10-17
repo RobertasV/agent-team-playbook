@@ -247,6 +247,12 @@ class TeamTest(Base):
             fcntl.flock(lock, fcntl.LOCK_EX)
             self.assertIn('already running', self.run_tool('watch').stdout)
         self.data(self.board())
+        self.assertIn('the owner wrote', self.run_tool('watch', '--once', now=T0).stdout)
+        self.assertIn('agentq plan', self.run_tool('watch', '--once', now=T1).stdout)
+        self.assertIn('no work', self.run_tool('watch', '--once', now=T2).stdout)
+        self.assertIn('agentq plan', self.run_tool('watch', '--once', now='2026-01-02T12:32:00Z').stdout)
+        with open(self.config + '.state.json', 'w') as f:
+            json.dump({}, f)
         run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--interval', '0'],
                              capture_output=True, text=True, env=self.env(), timeout=20)
         self.assertIn('agentq plan', run.stdout)
@@ -267,6 +273,10 @@ class TeamTest(Base):
         self.data({REPO: {'open': [issue(9, 'Easy one')]}})
         self.assertIn('1. set_session_effort local_p high', self.run_tool('assign', '9', 'programmer').stdout)
         self.assertNotIn('set_session', self.run_tool('assign', '9', 'programmer').stdout)
+        comments = len(self.calls(['issue', 'comment']))
+        self.run_tool('assign', '4', 'designer', '--queue')
+        self.assertEqual(len(self.calls(['issue', 'comment'])), comments)
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '4', '-R', REPO, '--add-label', 'design'])
 
     def test_brief_gives_the_owners_words_verbatim_and_screenshots_as_files(self):
         shot = os.path.join(self.dir.name, 'pic.png')

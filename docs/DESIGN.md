@@ -1,6 +1,6 @@
 # Agent team 0.2 – design
 
-Agreed with the owner before building 0.2. This is the build spec; `skill/agent-team/SKILL.md` is the short version agents read. Scope: **one project** (how two projects talk is decided later).
+Agreed with the owner before building 0.2. This is the build spec; `skill/agent-team/SKILL.md` is the short version agents read. Scope: one project at a time, installed per project (never globally); projects may share tasks (below).
 
 ## Team
 
@@ -28,7 +28,7 @@ When a new role overlaps an existing one (e.g. designer and marketer both claim 
 ## Flow
 
 1. **Watcher** (`agentq watch`, run in the background by the dispatcher) polls GitHub every minute and spends no tokens. It ignores the agent account's own comments, so agents' updates never wake anyone. It builds a plan:
-   - owner comments since the last mark → forward to the role holding that issue (default: programmer);
+   - owner comments since the last mark → forward to the role holding that issue (default: programmer); on an issue waiting for the owner's answer → back to its role; on a queued issue → nothing (its brief carries them); on an unlabelled one → it is classified anyway;
    - a role is **free** when no open issue carries both its role label and the working label; for each free programmer-mode role, the next issue: priority label → blocking label → oldest; unlabelled issues go to the dispatcher to classify;
    - checker-mode roles with a ready batch → a batch issue (`Check: #a #b #c`, pinned commit) labelled for that role.
    An empty plan means it keeps polling; otherwise it prints the plan and exits, which wakes the dispatcher.
@@ -48,10 +48,19 @@ When a new role overlaps an existing one (e.g. designer and marketer both claim 
 
 Busy is read from the board, so a role never gets a second task while it works on one. A direct chat between the owner and a session is not on the board; a task message then waits until the session answers the owner.
 
+## Sharing between projects
+
+Decided by the owner on 2026-10-17. When the team runs in several projects, the owner may link them (`agentq link other/repo "what belongs there"` in each). Sharing is on while a link exists.
+
+- A task that belongs wholly to a linked project: the dispatcher moves it there (`agentq move`, a GitHub transfer; a copy plus close where GitHub refuses). That project's dispatcher classifies it.
+- A mixed task, or one the dispatcher cannot place: it goes to this project's programmer as usual. The programmer works out exactly what belongs to the other project, updates this task to what stays, and creates the other part with `agentq split`, which links back to the task it came from.
+- The smarter session fixes what the dispatcher missed: a role may `move` or `split` too; a move by a role records a lesson for the dispatcher.
+
 ## Setup
 
-Run once by the programmer session when the skill is first used in a project:
+Run once per project by the programmer session when the skill is first used there:
 
+0. `agentq init`: this project's own config, the skill linked into this project only, both kept out of the project's git.
 1. Check: `gh`, the AI account signed in and active, Write access, which accounts are the owner's. Show the owner what is missing; only the owner signs in.
 2. Labels: working, question, deferred, waiting, priority, blocking, hard, waits-for-owner's-word, each role's label, each checker's `checked: <role>`.
 3. Sort the open issues: role labels, deferred; unclear ones go to the owner as one list.
@@ -60,20 +69,20 @@ Run once by the programmer session when the skill is first used in a project:
 6. Watcher in the dispatcher's background; daily health timer.
 7. "Turn on the marketer?"
 8. "Add more roles?" – name, what it does, mode (programmer / checker with N), model, effort, merge; repeat until no.
+9. When another project has the team too: "Share tasks between the projects?"
 
 Re-running setup creates nothing that exists: it finds the sessions from the config, recreates missing or archived ones and restarts the watcher (e.g. after a reboot).
 
-## To verify before building on it
+## Verified before building (2026-10-17)
 
-1. A background command that finishes wakes an idle session (the watcher depends on it; fallback: a scheduled run, which costs tokens every time).
-2. The dispatcher can message the role sessions.
-3. The AI account can download screenshots from private repositories.
-4. Sessions act on dispatcher messages when the skill says so.
-5. Whether the dispatcher can set a session's model or effort per task (batch vs release check, *hard*); otherwise the release check gets its own session.
+1. **Worked.** A background command that finishes wakes an idle session (60-second test). The watcher is built on it. Not tested: how long a background command may run.
+2. **Worked (from the tools' descriptions).** Any session can message another by its session id (`SendMessage` or `send_message`). The message arrives as a turn labelled with the sender. A session in a different permission mode holds such messages for the owner's approval, so all team sessions run in the same mode.
+3. **Worked.** The AI account downloads screenshots from a private repository: `gh api` with `Accept: application/vnd.github.full+json` returns the rendered HTML with short-lived signed image links that need no login.
+4. **Not verified.** Whether a session acts on a dispatcher message can only be seen with real sessions, which this build did not create. The skill tells sessions to act on it. Try one task end to end after setup.
+5. **Possible, with a condition.** `set_session_model` / `set_session_effort` switch another session from its next turn on. The app asks the owner first for a more expensive model, a higher effort or a session the caller did not start – except in bypass permission mode. So per-task switching (*hard*, release check) is silent only in bypass mode; otherwise the release check gets its own session.
 
 ## Open
 
-- How two projects work together.
 - A trial task at the end of setup (keep or drop).
 - Existing role sessions: reuse or start fresh (fresh is cheaper: old sessions carry long histories).
 - Texts and label names come from the config, so friends can use their own language.

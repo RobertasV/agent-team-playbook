@@ -212,6 +212,7 @@ def load_config(path):
     cfg['poll_seconds'] = cfg.get('poll_seconds', 60)
     cfg['watch_grace_minutes'] = cfg.get('watch_grace_minutes', 30)
     cfg['lesson_examples'] = cfg.get('lesson_examples', 5)
+    cfg['repeat_minutes'] = cfg.get('repeat_minutes', 30)
     cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
@@ -653,12 +654,17 @@ def cmd_watch(cfg, opts):
             if opts.once:
                 raise
         else:
-            work['watch'] = {'pid': os.getpid(), 'beat': iso(start)}
-            if plan:
-                work['watch']['exited'] = iso(start)
+            last = state.get('watch', {})
+            text = render_plan(cfg, plan, start) if plan else ''
+            body = text.split('\n', 1)[-1]
+            work['watch'] = {'pid': os.getpid(), 'beat': iso(start), 'plan': last.get('plan'), 'sent': last.get('sent')}
+            if plan and body == last.get('plan') and start - parse_time(last['sent']) < dt.timedelta(minutes=cfg['repeat_minutes']):
+                plan = None  # the dispatcher did not act on this plan: do not wake it every minute for it
+            elif plan:
+                work['watch'].update(exited=iso(start), plan=body, sent=iso(start))
             save_state(cfg, work)
             if plan:
-                print(render_plan(cfg, plan, start))
+                print(text)
                 return 0
             if opts.once:
                 print('agentq watch: no work.')
@@ -699,8 +705,12 @@ def cmd_assign(cfg, opts):
     labels = cfg['labels']
     remove = [r['label'] for r in cfg['roles'] if r is not role and r['label'] in names]
     remove += [labels['question']] if labels['question'] in names else []
-    busy = busy_with(cfg, board(repo), role, but=number)
     ref = f'{repo}#{number}'
+    if opts.queue:
+        relabel(repo, number, add=[role['label']], remove=remove)
+        print(f"{ref} → {role['role']}, in its queue")
+        return
+    busy = busy_with(cfg, board(repo), role, but=number)
     who = cfg['dispatcher']['name']
     if busy:
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
@@ -1301,6 +1311,7 @@ def main(argv=None):
     s = sub.add_parser('assign', help='give an issue to a role (working if the role is free, else queued)')
     s.add_argument('issue')
     s.add_argument('role')
+    s.add_argument('--queue', action='store_true', help='only the role label: no comment, no start (sorting at setup)')
     b = sub.add_parser('brief', help="the issue's title, text, the owner's comments verbatim and screenshots as files")
     b.add_argument('issue')
     b.add_argument('--since', help="only the owner's comments from this time on")

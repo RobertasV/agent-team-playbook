@@ -1,52 +1,114 @@
 # Agent team playbook
 
-Kaip mažai AI agentų komandai dirbti vienam žmogui (savininkui) taip, kad būtų tvarka ir netaškytų žetonų:
+A small team of AI agent sessions (Claude Code) that works for one human – the owner – on a project's GitHub issues. The owner writes tasks in plain words, from a phone if they like. A cheap dispatcher hands each task to the right session. Each session does its task and closes it with one command.
 
-- viena nuolatinė sesija vienai pareigybei (programuotojas, tikrintojas, taisyklių peržiūrėtojas);
-- užduočių eilė – GitHub užduotys (issues); ką praleisti, rodo etiketės; būsenas keičia agentas, savininkas tik rašo;
-- agentai GitHub'e rašo atskira AI paskyra, ne savininko vardu;
-- savininko klausimas nėra sprendimas; leidimas – tik po patikros ir savininko žodžio.
+## What you get
 
-Skilas agentams parašytas angliškai (taip pigiau žetonų prasme ir tinka bet kuriam agentui).
+- **You only write issues.** No labels, no states, no copying text between chats. Comment on an issue and your words reach the session working on it.
+- **Low token use while idle.** A script watches the board every minute and spends no tokens. The cheapest model (the dispatcher) wakes only when there is work, routes it and goes back to sleep.
+- **One task per role at a time.** Busy is read from the board, so a role never gets a second task while it works on one.
+- **The right model for the job.** The strongest model codes, a mid model checks batches, the cheapest one routes. Hard issues get the highest effort.
+- **Checks in batches, not after every task.** A checker wakes after N finished tasks (or 24 h) and turns each problem into a new issue linked to the original.
+- **It learns where tasks belong.** When a session gets a task that isn't its own, routing it on teaches the dispatcher. Your rules always outrank the agents' rules.
+- **Your words are never lost or reworded.** The dispatcher passes them on verbatim, with screenshots downloaded, even from private repositories.
+- **Everything is visible.** Every session is a normal session you can open. Every agent comment on GitHub comes from a separate AI account and starts with `🤖 <role>:`.
+- **Problems reach your phone.** A daily health check opens one GitHub issue when the watcher stopped or a task got stuck.
+- **Projects can share tasks.** A task filed in the wrong project moves to the right one. A task that spans two projects is split, and each part links back to the other.
+- **Per project, in your language.** The team is installed per project, never globally. All label names and texts come from the config.
 
-## Kas viduje
+## How it works
 
-| Kelias | Kas |
-|---|---|
-| `skill/agent-team/SKILL.md` | Skilas: taisyklės agentams |
-| `tools/agentq` | Eilės įrankis: `queue`, `take`, `ask`, `defer`, `wait`, `check`, `setup` |
-| `config.example.json` | Nustatymų pavyzdys |
-| `tests/` | Testai su netikru `gh` (tikro GitHub neliečia) |
-
-## Diegimas
-
-Reikia: `git`, `gh`, `python3`.
-
-1. **AI paskyra.** Susikurk atskirą GitHub paskyrą agentams (GitHub leidžia vieną nemokamą „mašinos“ paskyrą žmogui), pakviesk ją į savo projektus su teise **Write**. Šiame kompiuteryje prisijunk ja: `gh auth login` (patvirtinimo puslapį atidaryk naršyklės lange, kuriame esi prisijungęs AI paskyra). Savo paskyra lieka prisijungusi, bet neaktyvi (`gh auth switch` perjungia).
-2. **Paketas:** `git clone` šį projektą, pvz. į `~/Sites/agent-team-playbook`.
-3. **Tik pasirinktiems projektams.** Kiekviename projekte, kuriame agentai turi dirbti pagal šias taisykles:
-   - nustatymai: nukopijuok `config.example.json` į savo vietą, įrašyk savo paskyras, repozitoriją ir etiketes, o projekto šaknyje padaryk nuorodą `.agentq.json` į tą failą;
-   - Claude Code: `ln -s ~/Sites/agent-team-playbook/skill/agent-team <projektas>/.claude/skills/agent-team`;
-   - Codex: projekto `AGENTS.md` įrašyk eilutę „Team rules and the task queue: read `~/Sites/agent-team-playbook/skill/agent-team/SKILL.md`“;
-   - kad šie failai nepatektų į projekto git: įrašyk `.agentq.json` ir `.claude/skills/agent-team` į `.git/info/exclude`.
-4. **Etiketės:** projekto aplanke `~/Sites/agent-team-playbook/tools/agentq setup` sukuria trūkstamas.
-5. **Patikrinimas:** `tools/agentq queue` parodo eilę.
-
-Kituose projektuose skilas ir įrankis neveikia: nėra nei nuorodos į skilą, nei `.agentq.json`.
-
-## Kasdien
-
-- Agentas: `agentq queue` (eilė ir nauji savininko komentarai), tada `take` / `ask` / `defer` / `wait`.
-- `agentq check` randa neatitikimus (pamiršta „in progress“, neatsakytas savininko komentaras, užduotis, kurios laukta, jau uždaryta); `check --fix` sutvarko, ką gali. Jį galima leisti kartą per dieną laikmačiu – agento ir žetonų tam nereikia.
-
-## Atnaujinimas
-
-`git pull` paketo aplanke; kas pasikeitė – `CHANGELOG.md`. Nuorodos rodo į paketą, todėl projektai gauna naują versiją iškart.
-
-## Testai
-
-```bash
-python3 -m unittest discover -s tests
+```
+owner ──writes──▶ GitHub issues ◀──polls every minute, no tokens── agentq watch
+                                                                       │ work found: prints a plan, exits
+                                                                       ▼
+                                   dispatcher session (cheapest model, own small folder)
+                                     classify → agentq assign → agentq brief → send to the role's session
+                                                                       │
+             ┌─────────────────────────────┬───────────────────────────┴───────────┐
+             ▼                             ▼                                       ▼
+        programmer                      checker                         marketer / your own roles
+  (default role, interprets      (batches of finished tasks;
+   the owner's words)             release check on the owner's word)
+             └── finish with one command: done · ask · route · wait · move · split · checked
 ```
 
-Paketas skirtas dalintis, todėl jame negali būti jūsų privačių vardų. Jų sąrašą laikykite už paketo ribų (`~/.config/agentq/private-words.txt` arba `AGENTQ_PRIVATE_WORDS=<failas>`), ir testas patikrins, kad nė vienas jų nepateko į paketą.
+Roles work in one of two modes. **Programmer mode** gets one task at a time. **Checker mode** gets a batch issue (`Check: #a #b #c`, at a pinned commit) once N tasks are finished or the oldest has waited 24 h. Optionally, a checker-mode role only counts tasks whose commits touched given paths. The full design is in [docs/DESIGN.md](docs/DESIGN.md).
+
+## What you need
+
+- macOS or Linux with `git`, `python3` (standard library only) and [`gh`](https://cli.github.com).
+- The Claude desktop app (Code tab). Sessions message each other, and a finished background command wakes a session.
+- A separate GitHub account for the agents (the "AI account"). GitHub allows one free machine account per person. Invite it to your project with **Write** access, not Admin.
+
+## Install into a project
+
+Do this once per project. The team is never installed globally.
+
+1. **Get the package:** `git clone <this repository> ~/Sites/agent-team-playbook` (any folder works).
+2. **Sign the AI account in to `gh`:** run `gh auth login` and open the confirmation page in a browser where the AI account is signed in. Your own account can stay signed in, but inactive (`gh auth switch` changes the active one).
+3. **Open a Claude Code session in your project** and say:
+   > Install the agent team from ~/Sites/agent-team-playbook in this project. My GitHub login is `<you>`.
+
+   The session reads [the skill](skill/agent-team/SKILL.md) and walks through the install steps with you:
+   - `agentq init` creates this project's config in `~/.config/agentq/<owner>-<repo>.json`. It links `.agentq.json` and `.claude/skills/agent-team` into the project and keeps both out of git through `.git/info/exclude`.
+   - `agentq setup` checks access, then creates the labels, the roles table and the dispatcher's folder (`~/agent-team/<owner>-<repo>-dispatcher`).
+   - The session sorts your open issues, starts the checker and dispatcher sessions (you approve each once) and adds a daily health timer.
+   - It asks **"Turn on the marketer?"**, then **"Add more roles?"**, and repeats until you say no.
+4. **Another project?** Repeat step 3 there. When two projects both have the team, the session asks whether they should share tasks (`agentq link`).
+
+Nothing is installed outside the project and the two folders above. To uninstall, delete the two links in the project, its config and its dispatcher folder, and archive the sessions.
+
+## Daily use
+
+You write issues and comments. Labels you may use if you like: `priority`, `blocking`, `hard` (highest effort), `deferred`. To give a rule to the dispatcher, say it to any session, e.g. "banners go to the designer". The session runs `agentq teach --owner "banners → designer"`.
+
+The commands agents use:
+
+| Command | Who | What |
+|---|---|---|
+| `watch` | dispatcher (background) | poll every minute; print a plan and exit when there is work |
+| `assign N role [--queue]` | dispatcher, setup | role label + working (or queued when the role is busy) |
+| `brief N [--since T]` | dispatcher | the task verbatim, the owner's comments, screenshots as local files |
+| `done N "text"` | role | fixed: comment, close |
+| `ask N "question"` | role | stuck: ask the owner; out of the queue until answered |
+| `route N role "why"` | role | not mine: hand it over and teach the dispatcher |
+| `wait N other/repo#M` | role | needs another project first; `check --fix` brings it back |
+| `move N other/repo` · `split N other/repo "title" "text"` | dispatcher, role | sharing between linked projects |
+| `batch role` · `checked N` | dispatcher · checker | create a checker's batch · finish it (labels every task `checked: <role>`) |
+| `teach "topic → role" [--owner]` | anyone | a rule for the dispatcher |
+| `health` | daily timer | watcher alive, nothing stuck; problems go to one issue |
+| `init` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder |
+| `queue` · `take` · `defer` · `check` | anyone | the 0.1 commands, still available |
+
+## Configuration
+
+See [config.example.json](config.example.json). The main parts:
+
+- `owner_accounts`, `agent_account`, `repos`, `checkout` (the project folder, used for path filters and pinned commits);
+- `roles`: a table of role, label, mode, `n`/`hours`/`paths` (checker mode), model, `release_model`, effort, `hard_effort`, merge, session, description, examples;
+- `dispatcher`: folder, session, model, effort;
+- `links`: linked projects and what belongs there (sharing is on while a link exists);
+- `poll_seconds` (60), `repeat_minutes` (30: a plan the dispatcher did not act on wakes it again at most this often), `stale_hours` (24);
+- `labels` and `texts`: every label name and every text the tool writes, so you can use your own language.
+
+The dispatcher reads `roles.md` in its folder. agentq writes that file from the roles table, the rules and the last 5 routing lessons per role.
+
+## Limits worth knowing
+
+- A role session acts on a dispatcher message because the skill says so. Try one task end to end after installing.
+- Sessions must all run in the same permission mode. Otherwise cross-session messages wait for your approval.
+- The dispatcher switches a session's model or effort per task without asking only in bypass permission mode. Otherwise the app asks you each time, so leave `hard_effort` and `release_model` empty.
+- Moving an issue between projects uses GitHub's transfer, which only works within one account or organisation. Elsewhere agentq copies the issue and closes the original with a link.
+
+## Update
+
+Run `git pull` in the package folder. The links point into the package, so every project gets the new version at once. [CHANGELOG.md](CHANGELOG.md) says what changed.
+
+## Tests
+
+```bash
+python3 -I -m unittest discover -s tests
+```
+
+The tests run against a fake `gh` and never touch GitHub. The package is meant to be shared, so it must not contain private names. Keep your list of private words outside the package (`~/.config/agentq/private-words.txt`, or set `AGENTQ_PRIVATE_WORDS=<file>`); a test then checks that none of them got into the package.

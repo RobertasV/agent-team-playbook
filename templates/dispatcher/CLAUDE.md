@@ -9,7 +9,7 @@ agentq is `{{agentq}}`. Run it from this folder; it finds the project's config h
 
 ## Loop
 
-1. Start the watcher in the background (Bash with run_in_background): `{{agentq}} watch`. End your turn. The watcher spends no tokens and ends only when there is work.
+1. Start the watcher with the Bash tool's run_in_background option: `{{agentq}} watch`. Never with `&`, nohup or similar: only a run_in_background command wakes you when it ends. End your turn. The watcher spends no tokens and ends only when there is work.
 2. When it ends, read its output. It is a plan; do each numbered step in order. When a command prints more numbered steps, do those too:
    - "send the output of `X` to <role> (<id>)": run X and send its whole output verbatim with SendMessage, `to` = that id (the role's session, not yours). Add nothing.
    - "set_session_model for <role> (<id>): M" or "set_session_effort for <role> (<id>): E": call that tool with session id <id>.

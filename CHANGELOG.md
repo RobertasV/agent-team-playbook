@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.18 – 2026-10-18
+- A watcher started with `&` or nohup (its parent gone) stops at once: its end would wake nobody and the team would stall silently. The dispatcher's CLAUDE.md says to start it only with run_in_background.
+
 ## 0.2.17 – 2026-10-17
 - The dispatcher's CLAUDE.md: one command per call; never chain a command whose number an earlier one has not printed yet.
 

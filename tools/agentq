@@ -801,6 +801,9 @@ def cmd_watch(cfg, opts):
     interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
     code = os.path.getmtime(os.path.realpath(__file__))
     while True:
+        if os.getppid() == 1:  # started with & or nohup: its end would wake nobody, so the team would stall silently
+            print('agentq watch: not started by the session (its parent is gone) – start it with run_in_background.')
+            return 1
         if os.path.getmtime(os.path.realpath(__file__)) != code:
             print('agentq watch: agentq was updated – start the watcher again.')
             return 0

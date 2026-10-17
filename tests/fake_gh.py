@@ -41,6 +41,11 @@ elif args[:2] == ['label', 'list']:
     print(json.dumps([{'name': n} for n in repo.get('labels', [])]))
 elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['issue', 'close'], ['label', 'create']):
     pass
+elif args[0] == 'api' and '/contents/' in args[1]:
+    if args[1] not in data.get('raw', {}):
+        print('gh: Not Found (HTTP 404)', file=sys.stderr)
+        sys.exit(1)
+    sys.stdout.write(data['raw'][args[1]])
 elif args[0] == 'api':
     print(json.dumps(data.get('api', {}).get(args[1], [] if args[1].endswith('/comments') else {})))
 else:

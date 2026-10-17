@@ -312,6 +312,21 @@ class TeamTest(Base):
         files = [l for l in out.splitlines() if l.endswith('.png')]
         self.assertEqual(len(files), 2)
         self.assertEqual(open(files[0], 'rb').read(), b'\x89PNG fake')
+        repo_img = ('<img src="https://github.com/acme/shots/raw/main/s/a%20b.png">'
+                    '<img src="https://raw.githubusercontent.com/acme/closed/main/x.png">')
+        self.data({'api': {f'repos/{REPO}/issues/5': {'title': 'Shot', 'body': 'see', 'body_html': repo_img,
+                                                       'labels': [], 'user': {'login': 'boss'}}},
+                   'raw': {'repos/acme/shots/contents/s/a%20b.png?ref=main': 'PNGDATA'}})
+        out = self.run_tool('brief', '5').stdout
+        files = [l for l in out.splitlines() if l.endswith('.png')]
+        self.assertEqual(open(files[0]).read(), 'PNGDATA')
+        self.assertIn('could not download screenshot 2: the AI account cannot read acme/closed', out)
+        self.data({'api': {
+            f'repos/{REPO}/issues/3': {'title': 'Banner', 'body': 'Make it  *bold*', 'body_html': img,
+                                       'labels': [{'name': 'design'}], 'user': {'login': 'boss'}},
+            f'repos/{REPO}/issues/3/comments': [
+                {'user': {'login': 'boss'}, 'body': 'first words', 'body_html': '', 'created_at': '2026-01-02T08:00:00Z'},
+                {'user': {'login': 'boss'}, 'body': 'and red', 'body_html': img, 'created_at': '2026-01-02T10:00:00Z'}]}})
         news = self.run_tool('brief', '3', '--since', '2026-01-02T10:00:00Z').stdout
         self.assertIn('and red', news)
         self.assertNotIn('first words', news)

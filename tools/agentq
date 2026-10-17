@@ -30,6 +30,8 @@ ROUTE_MARK = '<!-- agentq:route -->'
 BATCH_MARK = re.compile(r'<!-- agentq:batch (\{.*?\}) -->')
 REF = re.compile(r'^(?:([\w.-]+/[\w.-]+)#)?#?(\d+)$')
 ARROW = re.compile(r'\s*(?:→|->)\s*')
+REPO_FILE = re.compile(r'^https://(?:github\.com/([\w.-]+)/([\w.-]+)/(?:raw|blob)/([^/]+)/([^?#]+)'
+                       r'|raw\.githubusercontent\.com/([\w.-]+)/([\w.-]+)/([^/]+)/([^?#]+))')
 IMG = re.compile(r'<img\b[^>]*?\bsrc="([^"]+)"', re.I)
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 MODES = ('programmer', 'checker')
@@ -740,15 +742,31 @@ def shot_name(url, kind, n):
     return f'shot-{n}{ext}'
 
 
+def repo_file(match):
+    """A file in a (maybe private) repository, read through gh as the AI account."""
+    owner, repo, ref, path = [g for g in match.groups() if g is not None]
+    path = urllib.parse.quote(urllib.parse.unquote(path))
+    run = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/contents/{path}?ref={ref}', '-H',
+                          'Accept: application/vnd.github.raw'], capture_output=True)
+    if run.returncode != 0:
+        raise OSError(f'the AI account cannot read {owner}/{repo} (the owner invites it with Read access)')
+    return run.stdout
+
+
 def download_shots(rendered, folder, first):
-    """Images in GitHub's rendered HTML have short-lived signed links that need no login, even in private repos."""
+    """Uploaded images have short-lived signed links in GitHub's rendered HTML that need no login, even in private
+    repos; an image linked from a repository is read through gh."""
     paths = []
     for n, src in enumerate((html.unescape(s) for s in IMG.findall(rendered or '')), first):
         if urllib.parse.urlparse(src).scheme not in ('https', 'file'):  # file: only in tests
             continue
         try:
-            with urllib.request.urlopen(src, timeout=30) as r:
-                data, kind = r.read(), (r.headers.get('Content-Type') or '').split(';')[0]
+            in_repo = REPO_FILE.match(src)
+            if in_repo:
+                data, kind = repo_file(in_repo), ''
+            else:
+                with urllib.request.urlopen(src, timeout=30) as r:
+                    data, kind = r.read(), (r.headers.get('Content-Type') or '').split(';')[0]
             os.makedirs(folder, exist_ok=True)
             path = os.path.join(folder, shot_name(src, kind, n))
             with open(path, 'wb') as f:

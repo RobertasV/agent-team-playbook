@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.10 – 2026-10-17
+- Screenshots go to `~/.cache/agentq/shots` (or `shots_dir`), never beside a config that may live in a git repository.
+
 ## 0.2.9 – 2026-10-17
 - `brief` downloads images linked from a repository (`github.com/o/r/raw/…`, `raw.githubusercontent.com/…`) through `gh` as the AI account; when the account cannot read that repository, it says so (the owner invites it with Read).
 

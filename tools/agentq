@@ -225,7 +225,7 @@ def load_config(path):
     cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
-    cfg['shots_dir'] = os.path.expanduser(cfg.get('shots_dir') or os.path.join(os.path.dirname(cfg['state_file']), 'shots'))
+    cfg['shots_dir'] = os.path.expanduser(cfg.get('shots_dir') or '~/.cache/agentq/shots')  # never beside a config in a repo
     return cfg
 
 

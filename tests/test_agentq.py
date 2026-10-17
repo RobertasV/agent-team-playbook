@@ -311,6 +311,7 @@ class TeamTest(Base):
         self.assertIn('--no-lesson', out)
         files = [l for l in out.splitlines() if l.endswith('.png')]
         self.assertEqual(len(files), 2)
+        self.assertTrue(files[0].startswith(os.path.join(self.dir.name, 'home', '.cache', 'agentq', 'shots')))
         self.assertEqual(open(files[0], 'rb').read(), b'\x89PNG fake')
         repo_img = ('<img src="https://github.com/acme/shots/raw/main/s/a%20b.png">'
                     '<img src="https://raw.githubusercontent.com/acme/closed/main/x.png">')

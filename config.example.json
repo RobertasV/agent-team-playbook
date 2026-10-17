@@ -1,0 +1,21 @@
+{
+  "owner_accounts": ["your-github-login"],
+  "agent_account": "your-ai-account",
+  "role": "programmer",
+  "repos": ["you/your-project"],
+  "labels": {
+    "working": "in progress",
+    "question": "question for owner",
+    "deferred": "deferred",
+    "waiting": "waiting for other project"
+  },
+  "skip_labels": ["after launch", "owner step", "needs decision"],
+  "stale_hours": 24,
+  "texts": {
+    "take": "taking this.",
+    "ask": "{text}",
+    "defer": "deferred. {text}",
+    "wait": "waiting for {ref}.",
+    "back": "{ref} is closed – back in the queue."
+  }
+}

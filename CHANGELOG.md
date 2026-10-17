@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.11 – 2026-10-17
+- `agentq pause "why"` / `agentq resume`: any session can pause the team on the owner's word; the watcher stays up and sends nothing. No session has to ask the dispatcher to stop its watcher.
+
 ## 0.2.10 – 2026-10-17
 - Screenshots go to `~/.cache/agentq/shots` (or `shots_dir`), never beside a config that may live in a git repository.
 

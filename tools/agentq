@@ -656,6 +656,15 @@ def cmd_watch(cfg, opts):
         state = load_state(cfg)
         start = now()
         work = copy.deepcopy(state)
+        if state.get('paused'):  # the team is paused: stay alive, send nothing
+            state['watch'] = {**state.get('watch', {}), 'pid': os.getpid(), 'beat': iso(start)}
+            state['watch'].pop('error', None)
+            save_state(cfg, state)
+            if opts.once:
+                print(f"agentq watch: paused since {state['paused']['at']} – {state['paused']['why']}")
+                return 0
+            time.sleep(interval)
+            continue
         try:
             plan = build_plan(cfg, work, start)
         except Fail as e:
@@ -1016,6 +1025,21 @@ def cmd_link(cfg, opts):
         print(f"{l['repo']}: {l['about']}")
     if not cfg['links']:
         print('no linked projects: sharing is off')
+
+
+def cmd_pause(cfg, opts):
+    """Pause the team: the watcher keeps running but plans nothing until `agentq resume`."""
+    state = load_state(cfg)
+    state['paused'] = {'at': iso(now()), 'why': opts.text or 'no reason given'}
+    save_state(cfg, state)
+    print(f"paused: the dispatcher gets no work until `agentq resume` ({state['paused']['why']})")
+
+
+def cmd_resume(cfg, opts):
+    state = load_state(cfg)
+    was = state.pop('paused', None)
+    save_state(cfg, state)
+    print('resumed: the watcher plans again from its next poll' if was else 'was not paused')
 
 
 def cmd_roles(cfg, opts):
@@ -1401,6 +1425,8 @@ def main(argv=None):
     t.add_argument('--owner', action='store_true', help='the owner said it')
     t.add_argument('--issue', help='ask a contradiction on this issue instead of a new one')
     sub.add_parser('roles', help='the roles, rules and lessons the dispatcher reads')
+    sub.add_parser('pause', help='pause the team: the watcher stays up but sends nothing').add_argument('text', nargs='?')
+    sub.add_parser('resume', help='end a pause')
     mv = sub.add_parser('move', help='all of it belongs to a linked project: move the issue there')
     mv.add_argument('issue')
     mv.add_argument('repo')
@@ -1463,7 +1489,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
-                'link': cmd_link}
+                'link': cmd_link, 'pause': cmd_pause, 'resume': cmd_resume}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

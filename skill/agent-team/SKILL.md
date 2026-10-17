@@ -36,6 +36,8 @@ New words from the owner on your task arrive the same way. A message waits while
 
 Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks; during install the programmer may message the sessions it starts.
 
+To pause the team (the owner's word): `agentq pause "why"`; the watcher keeps running but sends nothing until `agentq resume`. Never ask the dispatcher to stop its watcher.
+
 ## The owner's words
 
 - A question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.

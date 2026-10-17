@@ -263,6 +263,16 @@ class TeamTest(Base):
                              capture_output=True, text=True, env=self.env(), timeout=20)
         self.assertIn('agentq plan', run.stdout)
 
+    def test_pause_keeps_the_watcher_up_but_plans_nothing(self):
+        self.data(self.board())
+        self.assertIn('paused:', self.run_tool('pause', "owner's word: stop for today").stdout)
+        out = self.run_tool('watch', '--once').stdout
+        self.assertIn("paused since 2026-01-02T12:00:00Z – owner's word: stop for today", out)
+        self.assertNotIn('agentq plan', out)
+        self.assertEqual(self.calls(), [])
+        self.assertIn('resumed', self.run_tool('resume').stdout)
+        self.assertIn('agentq plan', self.run_tool('watch', '--once').stdout)
+
     def test_assign_starts_a_free_role_queues_for_a_busy_one_and_sets_effort(self):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(4, 'Icon', ['ask owner']),
                                    issue(8, 'Hard one', ['hard']), issue(9, 'Easy one')]}})

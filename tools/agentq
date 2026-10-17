@@ -1256,6 +1256,8 @@ def cmd_setup(cfg, opts):
         for r in raw['roles']:
             if r.get('mode') == 'checker' and not r.get('since'):
                 r['since'] = iso(now())
+        if opts.group:
+            raw['team_group'] = opts.group
         if opts.checkout:
             raw['checkout'] = os.path.abspath(os.path.expanduser(opts.checkout))
         disp = raw.setdefault('dispatcher', {})
@@ -1281,6 +1283,7 @@ def print_roles_table(cfg):
     d = cfg['dispatcher']
     print(f"dispatcher | - | - | - | - | {d.get('model') or '-'} | {d.get('effort') or '-'} | - | "
           f"{d['session'] or 'MISSING'} | folder {d['folder'] or '-'}")
+    print(f"sidebar group: {cfg.get('team_group') or 'MISSING'}")
 
 
 def cmd_role(cfg, opts):
@@ -1407,6 +1410,7 @@ def main(argv=None):
     su = sub.add_parser('setup', help='check access, write default roles, create labels and the dispatcher folder')
     su.add_argument('--checkout', help='the project folder (for path filters and pinned commits)')
     su.add_argument('--dispatcher-dir', help='the dispatcher folder (default ~/agent-team/<owner>-<repo>-dispatcher)')
+    su.add_argument('--group', help="the id of the app's sidebar group holding the team's sessions")
     ro = sub.add_parser('role', help='add or change a role ("dispatcher" sets the dispatcher\'s session)')
     ro.add_argument('name')
     ro.add_argument('--label')

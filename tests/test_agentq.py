@@ -433,7 +433,11 @@ class TeamTest(Base):
         self.assertIn('no Write access', run.stdout)
         self.assertEqual(self.calls(['label', 'create']), [])
         self.data({REPO: {'labels': []}, 'api': {'user': {'login': 'bot'}, f'repos/{REPO}': {'permissions': {'push': True}}}})
-        out = self.run_tool('setup').stdout
+        self.assertIn('sidebar group: MISSING', self.run_tool('setup').stdout)
+        out = self.run_tool('setup', '--group', 'grp-1').stdout
+        self.assertIn('sidebar group: grp-1', out)
+        with open(self.config) as f:
+            self.assertEqual(json.load(f)['team_group'], 'grp-1')
         made = [c[2] for c in self.calls(['label', 'create'])]
         for name in ('prog', 'design', 'check', 'checked: checker', 'priority', "waits for owner's word", 'check batch'):
             self.assertIn(name, made)

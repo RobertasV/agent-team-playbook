@@ -24,7 +24,7 @@
       "label": "programmer",
       "mode": "programmer",
       "model": "",
-      "effort": "high",
+      "effort": "xhigh",
       "hard_effort": "max",
       "merge": true,
       "session": "",
@@ -39,7 +39,8 @@
       "paths": [],
       "model": "",
       "release_model": "",
-      "effort": "high",
+      "effort": "xhigh",
+      "hard_effort": "max",
       "merge": false,
       "session": "",
       "description": "Checks batches of finished tasks. The full release check runs only on the owner's word."

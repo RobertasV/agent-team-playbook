@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.7 – 2026-10-17
+- Every role runs on the strongest model at extra-high effort (`xhigh`, `max` for *hard* issues); only the dispatcher stays on the cheapest. Defaults, the skill, README and design updated.
+
 ## 0.2.6 – 2026-10-17
 - Install step 5: every team session goes into one sidebar group named after the project; `agentq setup --group <id>` records it and the roles table shows it. The skill says why the dispatcher's folder is outside the project.
 

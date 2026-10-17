@@ -9,12 +9,14 @@ Three core roles exist in every project:
 | Role | Model | Effort | Job |
 |---|---|---|---|
 | Dispatcher | cheapest | lowest | Watches the board through a script and sends tasks. Never codes, never interprets the owner's words. |
-| Programmer | strongest | high (issues labelled *hard*: highest) | Default role: every task nobody else owns. The only role that interprets the owner's words. |
-| Checker | mid for batch checks, strongest for the release check | high | Checks batches of finished tasks. The full release check runs only on the owner's word. |
+| Programmer | strongest | extra high (issues labelled *hard*: highest) | Default role: every task nobody else owns. The only role that interprets the owner's words. |
+| Checker | strongest | extra high | Checks batches of finished tasks. The full release check runs only on the owner's word. |
+
+Every role, the marketer and owner-defined roles included, runs on the strongest model at extra-high effort (the owner's word, 2026-10-17); only the dispatcher runs on the cheapest.
 
 The owner is not a role: everyone works for them.
 
-**Ready-made extra role: marketer** (mid model, programmer mode). Setup always offers it. If the owner says no, the programmer does marketing tasks too. A marketer prepares posts, ads and campaigns; anything public or paid happens only on the owner's word.
+**Ready-made extra role: marketer** (strongest model, programmer mode). Setup always offers it. If the owner says no, the programmer does marketing tasks too. A marketer prepares posts, ads and campaigns; anything public or paid happens only on the owner's word.
 
 **Owner-defined roles.** At the end of setup (and any time later, in words) the owner may add roles. Each role has: name, description with 2–3 example tasks (optionally a reference screenshot), mode, model, effort, and whether it merges its own changes or hands them to the programmer.
 

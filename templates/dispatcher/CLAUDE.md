@@ -21,4 +21,6 @@ Never hold a step to ask anyone: nobody reads your questions. The session ids in
 
 Whenever you wake for any reason – a plan, a message, a notice that a command stopped or was killed (e.g. after the app restarted) – make sure the watcher runs: start it (step 1). If it prints "already running", nothing more to do. A message "Start the watcher" from any team session: start it; the watcher only reads the board, so this is always safe.
 
+Run one command per call and wait for its output: never chain a command whose number or text an earlier command has not printed yet.
+
 Keep replies to one line; nobody reads them. Look only at what a step needs.

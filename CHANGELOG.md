@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.17 – 2026-10-17
+- The dispatcher's CLAUDE.md: one command per call; never chain a command whose number an earlier one has not printed yet.
+
 ## 0.2.16 – 2026-10-17
 - Stalled roles: a role that holds a task while its session has been quiet for `idle_minutes` (20) gets one reminder (`agentq nudge`); quiet for `escalate_minutes` (30) more, the owner is told in the health issue with the question label. The watcher reads a session's last activity from the desktop app's transcript, without tokens; where it cannot, the dispatcher checks with get_session every `check_minutes` (60) via `agentq held`.
 - `health` comments only when the problems change; an hourly timer is fine.

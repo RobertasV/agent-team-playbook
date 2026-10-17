@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.3 – 2026-10-17
+- The skill: install only when the owner asks for it in words in that project; a session never starts it on its own.
+
 ## 0.2.2 – 2026-10-17
 - Plans and `assign`/`batch` name each session with its role: "send … to programmer (local_…)", "set_session_effort for programmer (local_…): max".
 - The dispatcher's CLAUDE.md states its own session id and that every id in a plan is a role session, never its own. `setup` and `agentq role dispatcher --session` write it, also into a CLAUDE.md made by 0.2.0/0.2.1.

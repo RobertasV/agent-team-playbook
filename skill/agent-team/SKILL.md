@@ -56,6 +56,8 @@ New words from the owner on your task arrive the same way. A message waits while
 
 ## Install (per project, by the programmer session, with the owner)
 
+Only when the owner asks for it in words in this project. A session never starts or re-runs the install on its own, not even when it sees the skill or config change.
+
 0. In the project: `<package>/tools/agentq init --owner <owner's login>` – this project's own config, the skill linked into this project only.
 1. Check: `agentq setup` checks `gh`, the AI account signed in and active, Write access. Show the owner what is missing; only the owner signs in. Re-run until it passes.
 2. Labels: the passing `agentq setup` creates them (working, question, deferred, waiting, priority, blocking, hard, waits for owner's word, each role, each checker's `checked: <role>`), with the dispatcher folder.

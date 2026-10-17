@@ -17,17 +17,27 @@ def opt(name, default=None):
 
 repo = data.get(opt('-R'), {})
 if args[:2] == ['issue', 'list']:
-    issues = repo.get(opt('--state'), [])
+    state = opt('--state')
+    issues = repo.get('open', []) + repo.get('closed', []) if state == 'all' else repo.get(state, [])
     label = opt('--label')
     if label:
         issues = [i for i in issues if label in [l['name'] for l in i.get('labels', [])]]
     print(json.dumps(issues))
 elif args[:2] == ['issue', 'view']:
-    print(json.dumps({'state': repo.get('states', {}).get(args[2], 'OPEN')}))
+    found = {'state': repo.get('states', {}).get(args[2], 'OPEN')}
+    for state in ('open', 'closed'):
+        for i in repo.get(state, []):
+            if str(i['number']) == args[2]:
+                found = {**i, 'state': state.upper()}
+    print(json.dumps(found))
+elif args[:2] == ['issue', 'create']:
+    print(f"https://github.com/{opt('-R')}/issues/{repo.get('next', 100)}")
 elif args[:2] == ['label', 'list']:
     print(json.dumps([{'name': n} for n in repo.get('labels', [])]))
-elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['label', 'create']):
+elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['issue', 'close'], ['label', 'create']):
     pass
+elif args[0] == 'api':
+    print(json.dumps(data.get('api', {}).get(args[1], [] if args[1].endswith('/comments') else {})))
 else:
     print(f'fake gh: unexpected {args}', file=sys.stderr)
     sys.exit(2)

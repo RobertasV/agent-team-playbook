@@ -3,32 +3,102 @@
 
 One command changes a task's state completely (comment + labels), so an agent
 cannot do half of it and forget the rest. Everything goes through `gh`, signed
-in as the AI account. See README.md and config.example.json.
+in as the AI account. See README.md, docs/DESIGN.md and config.example.json.
 """
 import argparse
+import copy
 import datetime as dt
+import fcntl
+import fnmatch
+import html
 import json
 import os
 import re
 import subprocess
 import sys
+import time
+import urllib.parse
+import urllib.request
 
+PACKAGE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+TEMPLATE = os.path.join(PACKAGE, 'templates', 'dispatcher')
 DEFAULT_CONFIG = os.path.expanduser('~/.config/agentq/config.json')
 PROJECT_CONFIG = '.agentq.json'
+FULL = 'Accept: application/vnd.github.full+json'
 WAIT_MARK = re.compile(r'<!-- agentq:wait ([\w.-]+/[\w.-]+)#(\d+) -->')
+BATCH_MARK = re.compile(r'<!-- agentq:batch (\{.*?\}) -->')
 REF = re.compile(r'^(?:([\w.-]+/[\w.-]+)#)?#?(\d+)$')
+ARROW = re.compile(r'\s*(?:→|->)\s*')
+IMG = re.compile(r'<img\b[^>]*?\bsrc="([^"]+)"', re.I)
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+MODES = ('programmer', 'checker')
+OVERLAP = dt.timedelta(minutes=10)
+DEFAULT_LABELS = {
+    'priority': 'priority',
+    'blocking': 'blocking',
+    'hard': 'hard',
+    'owner_word': "waits for owner's word",
+    'batch': 'check batch',
+    'health': 'agent health',
+    'checked': 'checked: {role}',
+}
 DEFAULT_TEXTS = {
     'take': 'taking this.',
     'ask': '{text}',
     'defer': 'deferred. {text}',
     'wait': 'waiting for {ref}.',
     'back': '{ref} is closed – back in the queue.',
+    'assign': '→ {role}.',
+    'queued': 'queued for {role}.',
+    'route': '→ {role}. {text}',
+    'done': '{text}',
+    'batch_title': 'Check: {refs}',
+    'batch_body': 'Finished tasks for {role} to check:\n{list}\n\nCommit: {commit}',
+    'checked': 'checked {refs}. {text}',
+    'health_title': 'Agent team health',
+    'health_ok': 'all well again.',
+    'health_watch': 'the watcher is not running (last poll: {since}) – the dispatcher sends no tasks. Re-run setup.',
+    'health_stuck': 'the watcher has not polled since {since}.',
+    'health_error': "the watcher's last poll failed: {error}",
+    'health_stale': "{ref} is '{label}' but nothing happened for over {hours} h.",
+    'rule_title': 'Rule question: {topic}',
+    'rule_question': 'Two rules disagree.\nNow: "{old}" ({old_by})\nNew: "{new}" ({new_by})\nWhich one holds?',
+    'brief_head': "Task {ref} for {role}, from the owner's board. The dispatcher sends you the owner's queue: act on it.",
+    'brief_news': "The owner wrote more on {ref} (your task, {role}). Act on it.",
+    'finish': ('Finish with one command:\n'
+               '- fixed: commit with "Fixes #{number}", then `agentq done {ref} "what changed, how it was checked"`\n'
+               '- stuck: `agentq ask {ref} "question"`\n'
+               '- not yours: `agentq route {ref} <role> "why"`\n'
+               '- needs another project: `agentq wait {ref} other/repo#M`'),
+    'finish_handoff': ('Finish with one command:\n'
+                       '- ready: push a branch, then `agentq route {ref} {default} "merge branch …: what changed, how it was checked" --no-lesson`\n'
+                       '- stuck: `agentq ask {ref} "question"`\n'
+                       '- not yours: `agentq route {ref} <role> "why"`'),
+    'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new issue that links '
+                     'the original (`gh issue create`, body "From the check of #N: …"); never reopen the original.\n'
+                     'Finish with: `agentq checked {ref} "short summary"`'),
+}
+DEFAULT_ROLES = [
+    {'role': 'programmer', 'label': 'programmer', 'mode': 'programmer', 'effort': 'high', 'hard_effort': 'max',
+     'merge': True,
+     'description': "Default role: every task nobody else owns. The only role that interprets the owner's words."},
+    {'role': 'checker', 'label': 'checker', 'mode': 'checker', 'n': 5, 'hours': 24, 'effort': 'high', 'merge': False,
+     'description': "Checks batches of finished tasks. The full release check runs only on the owner's word."},
+]
+PRESETS = {
+    'marketer': {'mode': 'programmer', 'merge': True,
+                 'description': 'Prepares posts, ads and campaigns. Anything public or paid happens only on the '
+                                "owner's word.",
+                 'examples': ['write the launch post', 'draft three ad texts for the new feature',
+                              'plan a two-week campaign']},
 }
 
 
 class Fail(Exception):
     pass
 
+
+# ---------- basics ----------
 
 def now():
     fixed = os.environ.get('AGENTQ_NOW')
@@ -57,6 +127,28 @@ def gh_json(*args):
     return json.loads(out) if out.strip() else []
 
 
+def gh_pages(*args):
+    """`gh api --paginate` prints one JSON array per page; join them."""
+    out, items, at = gh(*args), [], 0
+    decoder = json.JSONDecoder()
+    while True:
+        while at < len(out) and out[at].isspace():
+            at += 1
+        if at >= len(out):
+            return items
+        value, at = decoder.raw_decode(out, at)
+        items += value if isinstance(value, list) else [value]
+
+
+def git(checkout, *args):
+    run = subprocess.run(['git', '-C', os.path.expanduser(checkout), *args], capture_output=True, text=True)
+    if run.returncode != 0:
+        raise Fail(f"git {' '.join(args[:2])}: {run.stderr.strip()}")
+    return run.stdout
+
+
+# ---------- config and state ----------
+
 def find_config(explicit):
     """--config, then AGENTQ_CONFIG, then the nearest .agentq.json from here up (the project opted in), then the user default."""
     if explicit:
@@ -74,25 +166,61 @@ def find_config(explicit):
         here = parent
 
 
+def role_entry(raw):
+    role = {'label': raw['role'], 'mode': 'programmer', 'n': 5, 'hours': 24, 'paths': [], 'model': '',
+            'release_model': '', 'effort': '', 'hard_effort': '', 'session': '', 'description': '', 'examples': [],
+            'shots': [], **raw}
+    role.setdefault('merge', role['mode'] == 'programmer')
+    if role['mode'] not in MODES:
+        raise Fail(f'role {role["role"]}: mode must be one of {", ".join(MODES)}')
+    return role
+
+
 def load_config(path):
     try:
         with open(path, encoding='utf-8') as f:
-            cfg = json.load(f)
+            raw = json.load(f)
     except FileNotFoundError:
         raise Fail(f'no config at {path} (copy config.example.json there, or pass --config)')
-    for key in ('owner_accounts', 'agent_account', 'role', 'repos', 'labels'):
+    cfg = copy.deepcopy(raw)
+    for key in ('owner_accounts', 'agent_account', 'repos', 'labels'):
         if not cfg.get(key):
             raise Fail(f'config {path}: "{key}" is missing')
     for key in ('working', 'question', 'deferred', 'waiting'):
         if not cfg['labels'].get(key):
             raise Fail(f'config {path}: "labels.{key}" is missing')
+    cfg['_raw'], cfg['_path'] = raw, os.path.realpath(path)
+    cfg['labels'] = {**DEFAULT_LABELS, **cfg['labels']}
     cfg['texts'] = {**DEFAULT_TEXTS, **cfg.get('texts', {})}
+    cfg['roles'] = [role_entry(r) for r in (cfg.get('roles') or DEFAULT_ROLES)]
+    names = [r['role'] for r in cfg['roles']]
+    cfg['default_role'] = cfg.get('default_role') or ('programmer' if 'programmer' in names else names[0])
+    cfg['role'] = cfg.get('role') or cfg['default_role']
+    cfg['dispatcher'] = {'name': 'dispatcher', 'folder': '', 'session': '', **cfg.get('dispatcher', {})}
     skip = set(cfg.get('skip_labels', []))
-    skip.update(cfg['labels'][k] for k in ('question', 'deferred', 'waiting'))
+    skip.update(cfg['labels'][k] for k in ('question', 'deferred', 'waiting', 'owner_word', 'health'))
     cfg['skip'] = skip
-    cfg['state_file'] = os.path.expanduser(cfg.get('state_file') or os.path.realpath(path) + '.state.json')
+    cfg['state_file'] = os.path.expanduser(cfg.get('state_file') or cfg['_path'] + '.state.json')
     cfg['stale_hours'] = cfg.get('stale_hours', 24)
+    cfg['poll_seconds'] = cfg.get('poll_seconds', 60)
+    cfg['watch_grace_minutes'] = cfg.get('watch_grace_minutes', 30)
+    cfg['lesson_examples'] = cfg.get('lesson_examples', 5)
+    folder = cfg['dispatcher']['folder']
+    cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
+    cfg['shots_dir'] = os.path.expanduser(cfg.get('shots_dir') or os.path.join(os.path.dirname(cfg['state_file']), 'shots'))
     return cfg
+
+
+def save_config(cfg, change):
+    """Change the raw config (as written by the owner), write it back, return the reloaded config."""
+    raw = copy.deepcopy(cfg['_raw'])
+    change(raw)
+    tmp = cfg['_path'] + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(raw, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+    os.replace(tmp, cfg['_path'])
+    return load_config(cfg['_path'])
 
 
 def load_state(cfg):
@@ -110,6 +238,36 @@ def save_state(cfg, state):
     os.replace(tmp, cfg['state_file'])
 
 
+# ---------- roles ----------
+
+def role_by_name(cfg, name):
+    for role in cfg['roles']:
+        if role['role'].lower() == name.strip().lower():
+            return role
+    raise Fail(f'no role "{name}" (roles: {", ".join(r["role"] for r in cfg["roles"])})')
+
+
+def role_of_labels(cfg, names):
+    for role in cfg['roles']:
+        if role['label'] in names:
+            return role
+    return None
+
+
+def default_role(cfg):
+    return role_by_name(cfg, cfg['default_role'])
+
+
+def checked_label(cfg, role):
+    return cfg['labels']['checked'].format(role=role['role'])
+
+
+def session_of(role):
+    return role['session'] or f'<{role["role"]} session: not in the config – run setup>'
+
+
+# ---------- GitHub helpers ----------
+
 def resolve(cfg, ref):
     m = REF.match(ref.strip())
     if not m:
@@ -124,6 +282,11 @@ def labels_of(issue):
     return [l['name'] for l in issue.get('labels', [])]
 
 
+def login_of(item):
+    who = item.get('author') or item.get('user') or {}
+    return who.get('login')
+
+
 def one_line(text, size=200):
     text = ' '.join(text.split())
     return text if len(text) <= size else text[:size - 1] + '…'
@@ -134,8 +297,18 @@ def open_issues(repo):
                    '--json', 'number,title,labels,updatedAt,comments')
 
 
-def comment(cfg, repo, number, text):
-    body = f"🤖 {cfg['role']}: {text}"
+def board(repo):
+    """The open issues without their comments: cheap enough to read every minute."""
+    return gh_json('issue', 'list', '-R', repo, '--state', 'open', '--limit', '500',
+                   '--json', 'number,title,labels,author,createdAt,updatedAt')
+
+
+def view(repo, number):
+    return gh_json('issue', 'view', str(number), '-R', repo, '--json', 'number,title,body,labels,state,author')
+
+
+def comment(cfg, repo, number, text, who=None):
+    body = f"🤖 {who or cfg['role']}: {text}"
     gh('issue', 'comment', str(number), '-R', repo, '--body', body)
 
 
@@ -148,6 +321,31 @@ def relabel(repo, number, add=(), remove=()):
     if len(args) > 5:
         gh(*args)
 
+
+def create_issue(repo, title, body, labels):
+    args = ['issue', 'create', '-R', repo, '--title', title, '--body', body]
+    for name in labels:
+        args += ['--label', name]
+    url = gh(*args).strip().splitlines()[-1]
+    m = re.search(r'/issues/(\d+)$', url)
+    if not m:
+        raise Fail(f'gh issue create printed no issue link: {url}')
+    return int(m.group(1))
+
+
+def holder(cfg, issue):
+    """Who writes on this issue: the role whose label it carries, else the session's own role."""
+    role = role_of_labels(cfg, labels_of(issue))
+    return role['role'] if role else cfg['role']
+
+
+def trusted(cfg, issue):
+    if cfg.get('accept_issues_from_others'):
+        return True
+    return login_of(issue) in set(cfg['owner_accounts']) | {cfg['agent_account']}
+
+
+# ---------- 0.1 commands ----------
 
 def cmd_queue(cfg, opts):
     state = load_state(cfg)
@@ -194,21 +392,26 @@ def cmd_queue(cfg, opts):
 
 def cmd_take(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
-    comment(cfg, repo, number, cfg['texts']['take'])
+    comment(cfg, repo, number, cfg['texts']['take'], holder(cfg, view(repo, number)))
     relabel(repo, number, add=[cfg['labels']['working']])
     print(f'{repo}#{number}: taken')
 
 
+def ask_owner(cfg, repo, number, text, who):
+    comment(cfg, repo, number, cfg['texts']['ask'].format(text=text), who)
+    relabel(repo, number, add=[cfg['labels']['question']], remove=[cfg['labels']['working']])
+
+
 def cmd_ask(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
-    comment(cfg, repo, number, cfg['texts']['ask'].format(text=opts.text))
-    relabel(repo, number, add=[cfg['labels']['question']], remove=[cfg['labels']['working']])
+    ask_owner(cfg, repo, number, opts.text, holder(cfg, view(repo, number)))
     print(f'{repo}#{number}: asked the owner, out of the queue')
 
 
 def cmd_defer(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
-    comment(cfg, repo, number, cfg['texts']['defer'].format(text=opts.text or '').strip())
+    who = holder(cfg, view(repo, number))
+    comment(cfg, repo, number, cfg['texts']['defer'].format(text=opts.text or '').strip(), who)
     relabel(repo, number, add=[cfg['labels']['deferred']], remove=[cfg['labels']['working']])
     print(f'{repo}#{number}: deferred')
 
@@ -220,7 +423,7 @@ def cmd_wait(cfg, opts):
         raise Fail(f'"{opts.other}" must be owner/repo#N')
     ref = f'{m.group(1)}#{m.group(2)}'
     text = cfg['texts']['wait'].format(ref=ref) + f'\n<!-- agentq:wait {ref} -->'
-    comment(cfg, repo, number, text)
+    comment(cfg, repo, number, text, holder(cfg, view(repo, number)))
     relabel(repo, number, add=[cfg['labels']['waiting']], remove=[cfg['labels']['working']])
     print(f'{repo}#{number}: waits for {ref}')
 
@@ -270,22 +473,727 @@ def cmd_check(cfg, opts):
         print('all consistent')
 
 
-def cmd_setup(cfg, opts):
-    wanted = {cfg['labels'][k]: k for k in ('working', 'question', 'deferred', 'waiting')}
-    for repo in cfg['repos']:
-        have = {l['name'] for l in gh_json('label', 'list', '-R', repo, '--limit', '200', '--json', 'name')}
-        for name in wanted:
-            if name not in have:
-                gh('label', 'create', name, '-R', repo, '--color', 'BFBFBF', '--description', f'agentq: {wanted[name]}')
-                print(f'{repo}: label "{name}" created')
-    print('labels ready')
+# ---------- the watcher and its plan ----------
 
+def busy_with(cfg, issues, role, but=None):
+    working = cfg['labels']['working']
+    return [i for i in issues if i['number'] != but and role['label'] in labels_of(i) and working in labels_of(i)]
+
+
+def next_issue(cfg, issues, role):
+    """Priority label → blocking label → oldest."""
+    skip = cfg['skip'] | {cfg['labels']['working'], cfg['labels']['batch']}
+    queue = [i for i in issues if role['label'] in labels_of(i) and not skip & set(labels_of(i)) and trusted(cfg, i)]
+    queue.sort(key=lambda i: (cfg['labels']['priority'] not in labels_of(i),
+                              cfg['labels']['blocking'] not in labels_of(i), i['number']))
+    return queue[0] if queue else None
+
+
+def path_hit(name, patterns):
+    for p in patterns:
+        p = p.rstrip('/')
+        if name == p or name.startswith(p + '/') or fnmatch.fnmatch(name, p):
+            return True
+    return False
+
+
+def touched(cfg, items, patterns):
+    """Only the tasks whose commits (found by "#N" in the message, local git log) changed these paths."""
+    if not items:
+        return []
+    if not cfg.get('checkout'):
+        raise Fail('a path filter needs "checkout" (the project folder) in the config')
+    numbers = {i['number'] for i in items}
+    grep = '#(' + '|'.join(str(n) for n in sorted(numbers)) + ')([^0-9]|$)'
+    out = git(cfg['checkout'], 'log', '--all', '-E', f'--grep={grep}', '--format=%x1e%B%x1f', '--name-only')
+    hit = set()
+    for chunk in out.split('\x1e')[1:]:
+        message, _, files = chunk.partition('\x1f')
+        refs = {int(n) for n in re.findall(r'#(\d+)\b', message)} & numbers
+        if any(path_hit(f.strip(), patterns) for f in files.splitlines() if f.strip()):
+            hit |= refs
+    return [i for i in items if i['number'] in hit]
+
+
+def unchecked(cfg, state, repo, role, cache):
+    """Finished tasks this checker-mode role has not checked yet, oldest first."""
+    since = role.get('since') or state.setdefault('checker_since', {}).setdefault(role['role'], iso(now()))
+    if repo not in cache:
+        first = min([since] + [r.get('since') or since for r in cfg['roles'] if r['mode'] == 'checker'])
+        cache[repo] = gh_json('issue', 'list', '-R', repo, '--state', 'closed', '--limit', '300',
+                              '--search', f'closed:>={first}',
+                              '--json', 'number,title,labels,closedAt,stateReason,author')
+    not_tasks = {checked_label(cfg, role), cfg['labels']['batch'], cfg['labels']['health']}
+    items = [i for i in cache[repo]
+             if parse_time(i['closedAt']) >= parse_time(since) and i.get('stateReason') != 'NOT_PLANNED'
+             and not not_tasks & set(labels_of(i)) and trusted(cfg, i)]
+    if role['paths']:
+        items = touched(cfg, items, role['paths'])
+    return sorted(items, key=lambda i: i['closedAt'])
+
+
+def batch_ready(cfg, role, items, moment):
+    if not items:
+        return False
+    return len(items) >= int(role['n']) or moment - parse_time(items[0]['closedAt']) >= dt.timedelta(hours=float(role['hours']))
+
+
+def build_plan(cfg, state, start):
+    """Read the board; return the steps for the dispatcher. Moves the marks in `state`."""
+    owners = set(cfg['owner_accounts'])
+    labels = cfg['labels']
+    plan = []
+    for repo in cfg['repos']:
+        mine = state.setdefault(repo, {})
+        first = 'watch_mark' not in mine
+        seen = mine.setdefault('seen', {})
+        issues = board(repo)
+        taken = set()
+        window = iso(start - OVERLAP)
+        news = {}
+        for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '100',
+                            '--search', f'updated:>={window}', '--json', 'number,title,labels,state,comments'):
+            for c in item.get('comments', []):
+                key = c.get('id') or c.get('url') or f"{login_of(c)}@{c['createdAt']}"
+                at = parse_time(c['createdAt'])
+                if login_of(c) not in owners or key in seen or not start - OVERLAP <= at <= start:
+                    continue
+                seen[key] = c['createdAt']
+                if not first:
+                    news.setdefault(item['number'], (item, []))[1].append(c['createdAt'])
+        for key in [k for k, at in seen.items() if parse_time(at) < start - 2 * OVERLAP]:
+            del seen[key]
+        mine['watch_mark'] = iso(start)
+        for number, (item, times) in sorted(news.items()):
+            names = labels_of(item)
+            role = role_of_labels(cfg, names)
+            ref = f'{repo}#{number}'
+            is_open = item.get('state', 'OPEN') == 'OPEN'
+            if is_open and labels['question'] in names:
+                role = role or default_role(cfg)
+                plan.append(('answered', ref, role, item['title'], None))
+                taken.add(role['role'])
+            elif not is_open or (role and (labels['working'] in names or cfg['skip'] & set(names))) \
+                    or (not role and (labels['working'] in names or cfg['skip'] & set(names))):
+                plan.append(('forward', ref, role or default_role(cfg), item['title'], min(times)))
+            # an open issue without a role is classified below; a queued one carries the words in its brief
+        cache = {}
+        for role in cfg['roles']:
+            if role['role'] in taken or busy_with(cfg, issues, role):
+                continue
+            issue = next_issue(cfg, issues, role)
+            if issue:
+                plan.append(('assign', f"{repo}#{issue['number']}", role, issue['title'], None))
+            elif role['mode'] == 'checker' and batch_ready(cfg, role, unchecked(cfg, state, repo, role, cache), start):
+                plan.append(('batch', repo, role, None, None))
+        skip = cfg['skip'] | {labels['working'], labels['batch']}
+        loose = [i for i in sorted(issues, key=lambda i: i['number'])
+                 if not role_of_labels(cfg, labels_of(i)) and not skip & set(labels_of(i)) and trusted(cfg, i)]
+        for issue in loose[:10]:
+            plan.append(('classify', f"{repo}#{issue['number']}", None, issue['title'], None))
+    return plan
+
+
+def render_plan(cfg, plan, start):
+    q = 'agentq'
+    lines = [f'agentq plan {iso(start)} – do each step in order:']
+    for n, (kind, ref, role, title, since) in enumerate(plan, 1):
+        if kind == 'forward':
+            lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send the output of '
+                         f'`{q} brief {ref} --since {since}` to session {session_of(role)}.')
+        elif kind == 'answered':
+            lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
+        elif kind == 'assign':
+            lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
+        elif kind == 'batch':
+            lines.append(f'{n}. a batch is ready for {role["role"]}: run `{q} batch {role["role"]} -R {ref}` '
+                         f'and do what it prints.')
+        else:
+            lines.append(f'{n}. classify {ref} "{one_line(title, 80)}": pick a role (roles.md; unsure → '
+                         f'{cfg["default_role"]}), run `{q} assign {ref} <role>` and do what it prints.')
+    lines.append(f'Last: start `{q} watch` again in the background.')
+    return '\n'.join(lines)
+
+
+def watch_lock(cfg):
+    handle = open(cfg['state_file'] + '.watch.lock', 'a')
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def cmd_watch(cfg, opts):
+    lock = watch_lock(cfg)
+    if lock is None:
+        print('agentq watch: already running – nothing to do.')
+        return 0
+    interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
+    while True:
+        state = load_state(cfg)
+        start = now()
+        work = copy.deepcopy(state)
+        try:
+            plan = build_plan(cfg, work, start)
+        except Fail as e:
+            state['watch'] = {'pid': os.getpid(), 'beat': iso(start), 'error': str(e)}
+            save_state(cfg, state)
+            if opts.once:
+                raise
+        else:
+            work['watch'] = {'pid': os.getpid(), 'beat': iso(start)}
+            if plan:
+                work['watch']['exited'] = iso(start)
+            save_state(cfg, work)
+            if plan:
+                print(render_plan(cfg, plan, start))
+                return 0
+            if opts.once:
+                print('agentq watch: no work.')
+                return 0
+        time.sleep(interval)
+
+
+# ---------- dispatcher commands ----------
+
+def session_settings(cfg, state, role, issue_labels, batch):
+    """The model and effort this task needs; a line for each that differs from what was last set."""
+    want = {'model': role['model'], 'effort': role['effort']}
+    if role['mode'] == 'checker' and not batch and role['release_model']:
+        want['model'] = role['release_model']
+    if cfg['labels']['hard'] in issue_labels and role['hard_effort']:
+        want['effort'] = role['hard_effort']
+    last = state.setdefault('sessions', {}).setdefault(role['role'], {})
+    lines = []
+    for key, tool in (('model', 'set_session_model'), ('effort', 'set_session_effort')):
+        if want[key] and want[key] != last.get(key):
+            lines.append(f'{tool} {session_of(role)} {want[key]}')
+            last[key] = want[key]
+    return lines
+
+
+def print_send(cfg, state, role, ref, issue_labels, batch=False):
+    steps = session_settings(cfg, state, role, issue_labels, batch)
+    steps.append(f'send the output of `agentq brief {ref}` to session {session_of(role)}')
+    for n, step in enumerate(steps, 1):
+        print(f'{n}. {step}')
+
+
+def cmd_assign(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    role = role_by_name(cfg, opts.role)
+    issue = view(repo, number)
+    names = labels_of(issue)
+    labels = cfg['labels']
+    remove = [r['label'] for r in cfg['roles'] if r is not role and r['label'] in names]
+    remove += [labels['question']] if labels['question'] in names else []
+    busy = busy_with(cfg, board(repo), role, but=number)
+    ref = f'{repo}#{number}'
+    who = cfg['dispatcher']['name']
+    if busy:
+        comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
+        relabel(repo, number, add=[role['label']], remove=remove)
+        print(f"{ref} → {role['role']}, queued ({role['role']} works on #{busy[0]['number']}). Nothing to send.")
+        return
+    comment(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who)
+    relabel(repo, number, add=[role['label'], labels['working']], remove=remove)
+    print(f"{ref} → {role['role']}, working. Now:")
+    state = load_state(cfg)
+    print_send(cfg, state, role, ref, names, batch=labels['batch'] in names)
+    save_state(cfg, state)
+
+
+def shot_name(url, kind, n):
+    ext = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp'}.get(kind)
+    if not ext:
+        ext = os.path.splitext(urllib.parse.urlparse(url).path)[1][:5] or '.img'
+    return f'shot-{n}{ext}'
+
+
+def download_shots(rendered, folder, first):
+    """Images in GitHub's rendered HTML have short-lived signed links that need no login, even in private repos."""
+    paths = []
+    for n, src in enumerate((html.unescape(s) for s in IMG.findall(rendered or '')), first):
+        if urllib.parse.urlparse(src).scheme not in ('https', 'file'):  # file: only in tests
+            continue
+        try:
+            with urllib.request.urlopen(src, timeout=30) as r:
+                data, kind = r.read(), (r.headers.get('Content-Type') or '').split(';')[0]
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, shot_name(src, kind, n))
+            with open(path, 'wb') as f:
+                f.write(data)
+            paths.append(path)
+        except OSError as e:
+            paths.append(f'(could not download screenshot {n}: {e})')
+    return paths
+
+
+def cmd_brief(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    ref = f'{repo}#{number}'
+    issue = gh_json('api', f'repos/{repo}/issues/{number}', '-H', FULL)
+    comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
+    owners = set(cfg['owner_accounts'])
+    since = parse_time(opts.since) if opts.since else None
+    picked = [c for c in comments if login_of(c) in owners and (since is None or parse_time(c['created_at']) >= since)]
+    names = labels_of(issue)
+    role = role_of_labels(cfg, names) or default_role(cfg)
+    folder = os.path.join(cfg['shots_dir'], repo.replace('/', '-'), str(number))
+    texts = cfg['texts']
+    out = [(texts['brief_news'] if since else texts['brief_head']).format(ref=ref, role=role['role']),
+           f"Title: {issue['title']}"]
+    shots = []
+    if not since:
+        author = login_of(issue)
+        tag = 'the owner' if author in owners else 'an agent' if author == cfg['agent_account'] else 'NOT the owner'
+        out += [f'Labels: {", ".join(names) or "none"}', f'--- issue text by {author} ({tag}) ---',
+                (issue.get('body') or '(empty)').strip()]
+        shots += download_shots(issue.get('body_html'), folder, 1)
+    for c in picked:
+        out += [f"--- the owner ({login_of(c)}), {c['created_at']} ---", (c.get('body') or '').strip()]
+        shots += download_shots(c.get('body_html'), folder, len(shots) + 1)
+    if shots:
+        out.append('--- screenshots, in order, as local files ---')
+        out += shots
+    if not since:
+        batch = BATCH_MARK.search(issue.get('body') or '')
+        finish = 'finish_batch' if batch else 'finish' if role['merge'] else 'finish_handoff'
+        out += ['---', texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
+    print('\n'.join(out))
+
+
+# ---------- lessons, rules, routing ----------
+
+def lessons_path(cfg):
+    return os.path.join(cfg['team_dir'], 'lessons.json')
+
+
+def load_lessons(cfg):
+    try:
+        with open(lessons_path(cfg), encoding='utf-8') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        data = {}
+    return {'rules': data.get('rules', []), 'examples': data.get('examples', {})}
+
+
+def render_roles(cfg, lessons):
+    lines = ['# Roles', '',
+             'Written by agentq from the config, `agentq route` and `agentq teach`. Do not edit by hand.', '']
+    for role in cfg['roles']:
+        extra = ' (default: when unsure)' if role['role'] == cfg['default_role'] else ''
+        lines.append(f"## {role['role']}{extra}")
+        mode = role['mode'] + (f", batches of {role['n']} or {role['hours']} h" if role['mode'] == 'checker' else '')
+        lines.append(f"Label `{role['label']}`, {mode}." + (f" Paths: {', '.join(role['paths'])}." if role['paths'] else ''))
+        if role['description']:
+            lines.append(role['description'])
+        lines += [f'- e.g. {e}' for e in role['examples']]
+        lines += [f'- reference screenshot: examples/{name}' for name in role['shots']]
+        routed = lessons['examples'].get(role['role'], [])
+        if routed:
+            lines.append('Routed here by a role that got it by mistake:')
+            lines += [f"- {e['issue']} {e['title']} (not {e['from']})" for e in routed]
+        lines.append('')
+    lines.append('## Rules')
+    lines += [f"- {r['text']} ({r['by']})" for r in lessons['rules']] or ['- none yet']
+    return '\n'.join(lines) + '\n'
+
+
+def save_lessons(cfg, lessons):
+    os.makedirs(cfg['team_dir'], exist_ok=True)
+    tmp = lessons_path(cfg) + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(lessons, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, lessons_path(cfg))
+    write_roles(cfg, lessons)
+
+
+def write_roles(cfg, lessons=None):
+    os.makedirs(cfg['team_dir'], exist_ok=True)
+    with open(os.path.join(cfg['team_dir'], 'roles.md'), 'w', encoding='utf-8') as f:
+        f.write(render_roles(cfg, lessons or load_lessons(cfg)))
+
+
+def cmd_route(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    target = role_by_name(cfg, opts.role)
+    issue = view(repo, number)
+    names = labels_of(issue)
+    old = role_of_labels(cfg, names)
+    who = old['role'] if old else cfg['role']
+    remove = [r['label'] for r in cfg['roles'] if r is not target and r['label'] in names]
+    remove += [cfg['labels']['working']] if cfg['labels']['working'] in names else []
+    comment(cfg, repo, number, cfg['texts']['route'].format(role=target['role'], text=opts.text or '').strip(), who)
+    relabel(repo, number, add=[target['label']], remove=remove)
+    print(f"{repo}#{number} → {target['role']}")
+    if opts.no_lesson or (old and old is target):
+        return
+    lessons = load_lessons(cfg)
+    examples = lessons['examples'].setdefault(target['role'], [])
+    examples.append({'issue': f'#{number}', 'title': one_line(issue['title'], 100), 'from': who})
+    del examples[:-int(cfg['lesson_examples'])]
+    save_lessons(cfg, lessons)
+    print(f"lesson recorded for the dispatcher: #{number} is {target['role']}'s, not {who}'s")
+
+
+def cmd_teach(cfg, opts):
+    text = ' '.join(opts.rule.split())
+    by = 'owner' if opts.owner else 'agent'
+    parts = ARROW.split(text, maxsplit=1)
+    topic, role = (parts[0].lower(), role_by_name(cfg, parts[1])['role']) if len(parts) == 2 else (None, None)
+    if role:
+        text = f'{parts[0]} → {role}'
+    lessons = load_lessons(cfg)
+    rules = lessons['rules']
+    same = [r for r in rules if (topic and r.get('topic') == topic) or r['text'].lower() == text.lower()]
+    clash = next((r for r in same if r.get('role') != role), None)
+    known = next((r for r in same if r.get('role') == role), None)
+    if known and not clash:
+        if by == 'owner' and known['by'] != 'owner':
+            known['by'] = 'owner'
+            save_lessons(cfg, lessons)
+        print(f'already a rule: {known["text"]}')
+        return
+    if clash and by == 'owner' and clash['by'] != 'owner':
+        rules.remove(clash)
+        print(f'the owner\'s rule replaces "{clash["text"]}"')
+    elif clash and by != 'owner' and clash['by'] == 'owner':
+        print(f'not written: the owner\'s rule stands – "{clash["text"]}". If it looks wrong, ask the owner.')
+        return
+    elif clash:
+        question = cfg['texts']['rule_question'].format(old=clash['text'], old_by=clash['by'], new=text, new_by=by)
+        if opts.issue:
+            repo, number = resolve(cfg, opts.issue)
+            ask_owner(cfg, repo, number, question, cfg['role'])
+            print(f'not written: the rules disagree – asked the owner on {repo}#{number}')
+        else:
+            repo = cfg['repos'][0]
+            number = create_issue(repo, cfg['texts']['rule_title'].format(topic=topic),
+                                  f"🤖 {cfg['role']}: {question}", [cfg['labels']['question']])
+            print(f'not written: the rules disagree – asked the owner in {repo}#{number}')
+        return
+    rules.append({'text': text, 'topic': topic, 'role': role, 'by': by, 'at': iso(now())})
+    save_lessons(cfg, lessons)
+    print(f'rule written: {text} ({by})')
+
+
+def cmd_roles(cfg, opts):
+    print(render_roles(cfg, load_lessons(cfg)), end='')
+
+
+# ---------- finishing ----------
+
+def cmd_done(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    issue = view(repo, number)
+    comment(cfg, repo, number, cfg['texts']['done'].format(text=opts.text), holder(cfg, issue))
+    if cfg['labels']['working'] in labels_of(issue):
+        relabel(repo, number, remove=[cfg['labels']['working']])
+    if issue.get('state', 'OPEN') == 'OPEN':
+        gh('issue', 'close', str(number), '-R', repo)
+    print(f'{repo}#{number}: done')
+
+
+def cmd_batch(cfg, opts):
+    role = role_by_name(cfg, opts.role)
+    if role['mode'] != 'checker':
+        raise Fail(f'{role["role"]} is not a checker-mode role')
+    repo = opts.repo or cfg['repos'][0]
+    if repo not in cfg['repos']:
+        raise Fail(f'{repo} is not in this config')
+    busy = busy_with(cfg, board(repo), role)
+    if busy:
+        raise Fail(f"{role['role']} is busy with {repo}#{busy[0]['number']}")
+    state = load_state(cfg)
+    items = unchecked(cfg, state, repo, role, {})[:20]
+    if not items:
+        print(f'nothing for {role["role"]} to check')
+        return
+    if not opts.now and not batch_ready(cfg, role, items, now()):
+        print(f'not ready: {len(items)} of {role["n"]}, the oldest closed {items[0]["closedAt"]} (--now to check anyway)')
+        return
+    refs = ' '.join(f"#{i['number']}" for i in items)
+    commit = git(cfg['checkout'], 'rev-parse', 'HEAD').strip() if cfg.get('checkout') else 'not pinned (no checkout in the config)'
+    body = cfg['texts']['batch_body'].format(role=role['role'], commit=commit,
+                                             list='\n'.join(f"- #{i['number']} {i['title']}" for i in items))
+    mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items]})
+    number = create_issue(repo, cfg['texts']['batch_title'].format(refs=refs), f'{body}\n\n<!-- agentq:batch {mark} -->',
+                          [role['label'], cfg['labels']['batch'], cfg['labels']['working']])
+    ref = f'{repo}#{number}'
+    print(f"{ref} created: {role['role']} checks {refs}. Now:")
+    print_send(cfg, state, role, ref, [], batch=True)
+    save_state(cfg, state)
+
+
+def cmd_checked(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    issue = view(repo, number)
+    m = BATCH_MARK.search(issue.get('body') or '')
+    if not m:
+        raise Fail(f'{repo}#{number} is not a batch made by `agentq batch`')
+    mark = json.loads(m.group(1))
+    role = role_by_name(cfg, mark['role'])
+    label = checked_label(cfg, role)
+    for n in mark['issues']:
+        relabel(repo, n, add=[label])
+    refs = ' '.join(f'#{n}' for n in mark['issues'])
+    comment(cfg, repo, number, cfg['texts']['checked'].format(refs=refs, text=opts.text or '').strip(), role['role'])
+    relabel(repo, number, remove=[cfg['labels']['working']])
+    gh('issue', 'close', str(number), '-R', repo)
+    print(f"{repo}#{number}: {refs} labelled '{label}', batch closed")
+
+
+# ---------- health ----------
+
+def cmd_health(cfg, opts):
+    state = load_state(cfg)
+    moment = now()
+    texts = cfg['texts']
+    grace = dt.timedelta(minutes=cfg['watch_grace_minutes'])
+    beat = state.get('watch', {})
+    problems = []
+    lock = watch_lock(cfg)
+    if lock is not None:
+        lock.close()
+        exited = beat.get('exited')
+        if not (exited and exited == beat.get('beat') and moment - parse_time(exited) < grace):
+            problems.append(texts['health_watch'].format(since=beat.get('beat') or 'never'))
+    elif beat.get('beat') and moment - parse_time(beat['beat']) > grace:
+        problems.append(texts['health_stuck'].format(since=beat['beat']))
+    if beat.get('error'):
+        problems.append(texts['health_error'].format(error=beat['error']))
+    stale = dt.timedelta(hours=cfg['stale_hours'])
+    for repo in cfg['repos']:
+        for issue in board(repo):
+            if cfg['labels']['working'] in labels_of(issue) and moment - parse_time(issue['updatedAt']) > stale:
+                problems.append(texts['health_stale'].format(ref=f"{repo}#{issue['number']}",
+                                                             label=cfg['labels']['working'], hours=cfg['stale_hours']))
+    repo = cfg['repos'][0]
+    label = cfg['labels']['health']
+    found = gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '5', '--json', 'number')
+    report = '\n'.join(f'- {p}' for p in problems)
+    if problems and found:
+        comment(cfg, repo, found[0]['number'], '\n' + report, 'health')
+        print(f"problems reported on {repo}#{found[0]['number']}:\n{report}")
+    elif problems:
+        number = create_issue(repo, texts['health_title'], f'🤖 health:\n{report}', [label])
+        print(f'problems reported in {repo}#{number}:\n{report}')
+    elif found:
+        comment(cfg, repo, found[0]['number'], texts['health_ok'], 'health')
+        gh('issue', 'close', str(found[0]['number']), '-R', repo)
+        print(f"healthy; {repo}#{found[0]['number']} closed")
+    else:
+        print('healthy')
+
+
+# ---------- setup ----------
+
+def all_labels(cfg):
+    names = {cfg['labels'][k]: k for k in ('working', 'question', 'deferred', 'waiting', 'priority', 'blocking',
+                                            'hard', 'owner_word', 'batch', 'health')}
+    for role in cfg['roles']:
+        names.setdefault(role['label'], f'role: {role["role"]}')
+        if role['mode'] == 'checker':
+            names.setdefault(checked_label(cfg, role), f'checked by {role["role"]}')
+    return names
+
+
+def ensure_labels(cfg):
+    wanted = all_labels(cfg)
+    for repo in cfg['repos']:
+        have = {l['name'] for l in gh_json('label', 'list', '-R', repo, '--limit', '300', '--json', 'name')}
+        for name, what in wanted.items():
+            if name not in have:
+                gh('label', 'create', name, '-R', repo, '--color', 'BFBFBF', '--description', f'agentq: {what}')
+                print(f'{repo}: label "{name}" created')
+
+
+def install_dispatcher(cfg, folder):
+    """Copy the dispatcher's template (only missing files), link the config, write roles.md."""
+    folder = os.path.abspath(os.path.expanduser(folder))
+    agentq = os.path.realpath(__file__)
+    for base, _, files in os.walk(TEMPLATE):
+        for name in files:
+            source = os.path.join(base, name)
+            target = os.path.join(folder, os.path.relpath(source, TEMPLATE))
+            if os.path.exists(target):
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(source, encoding='utf-8') as f:
+                text = f.read().replace('{{agentq}}', agentq).replace('{{default_role}}', cfg['default_role'])
+            with open(target, 'w', encoding='utf-8') as f:
+                f.write(text)
+            print(f'dispatcher: {target} written')
+    link = os.path.join(folder, PROJECT_CONFIG)
+    if not os.path.lexists(link):
+        os.symlink(cfg['_path'], link)
+        print(f'dispatcher: {link} → {cfg["_path"]}')
+    return folder
+
+
+def exclude_locally(top, *names):
+    """Keep agentq's links out of the project's git without touching its .gitignore."""
+    path = git(top, 'rev-parse', '--git-path', 'info/exclude').strip()
+    path = path if os.path.isabs(path) else os.path.join(top, path)
+    have = open(path, encoding='utf-8').read().split('\n') if os.path.exists(path) else []
+    missing = [n for n in names if n not in have]
+    if missing:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write(('\n' if have and have[-1] else '') + '\n'.join(missing) + '\n')
+
+
+def link(target, at):
+    if os.path.lexists(at):
+        return False
+    os.makedirs(os.path.dirname(at), exist_ok=True)
+    os.symlink(target, at)
+    return True
+
+
+def cmd_init(opts):
+    """Install the team into one project: its own config, the skill link, both kept out of the project's git."""
+    top = git(os.path.abspath(opts.project or '.'), 'rev-parse', '--show-toplevel').strip()
+    repo = opts.repo
+    if not repo:
+        url = git(top, 'remote', 'get-url', 'origin').strip()
+        m = re.search(r'github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$', url)
+        if not m:
+            raise Fail(f'cannot tell the GitHub repository from "{url}" (pass --repo owner/name)')
+        repo = m.group(1)
+    path = os.path.expanduser(opts.config or f"~/.config/agentq/{repo.replace('/', '-')}.json")
+    if os.path.exists(path):
+        print(f'config exists: {path}')
+    else:
+        who = gh_json('api', 'user')
+        with open(os.path.join(PACKAGE, 'config.example.json'), encoding='utf-8') as f:
+            raw = json.load(f)
+        raw.update({'owner_accounts': opts.owner, 'agent_account': who.get('login') or '', 'repos': [repo],
+                    'checkout': top})
+        raw['dispatcher']['folder'] = os.path.expanduser(f"~/agent-team/{repo.replace('/', '-')}-dispatcher")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(raw, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        print(f'config written: {path} (AI account: {raw["agent_account"] or "unknown – sign gh in"})')
+    skill = os.path.join('.claude', 'skills', 'agent-team')
+    if link(path, os.path.join(top, PROJECT_CONFIG)):
+        print(f'{top}/{PROJECT_CONFIG} → {path}')
+    if link(os.path.join(PACKAGE, 'skill', 'agent-team'), os.path.join(top, skill)):
+        print(f'{top}/{skill} → the skill')
+    exclude_locally(top, PROJECT_CONFIG, skill)
+    print(f'installed in {top} only. Next: agentq setup (from the project folder).')
+
+
+def cmd_setup(cfg, opts):
+    problems = []
+    who = gh_json('api', 'user')
+    login = who.get('login') if isinstance(who, dict) else None
+    if login != cfg['agent_account']:
+        problems.append(f"gh is signed in as {login or 'nobody'}, not the AI account {cfg['agent_account']} "
+                        f"(the owner runs: gh auth login, or gh auth switch -u {cfg['agent_account']})")
+    for repo in cfg['repos']:
+        info = gh_json('api', f'repos/{repo}')
+        rights = info.get('permissions', {}) if isinstance(info, dict) else {}
+        if not rights.get('push'):
+            problems.append(f'{cfg["agent_account"]} has no Write access to {repo} (the owner invites it with Write)')
+        elif rights.get('admin'):
+            problems.append(f'{cfg["agent_account"]} has Admin on {repo}; Write is enough (the owner lowers it)')
+    if problems:
+        print('missing – only the owner can fix these:\n' + '\n'.join(f'- {p}' for p in problems))
+        return 1
+
+    def fill(raw):
+        raw.setdefault('roles', [{**r, 'session': ''} for r in DEFAULT_ROLES])
+        for r in raw['roles']:
+            if r.get('mode') == 'checker' and not r.get('since'):
+                r['since'] = iso(now())
+        if opts.checkout:
+            raw['checkout'] = os.path.abspath(os.path.expanduser(opts.checkout))
+        disp = raw.setdefault('dispatcher', {})
+        if opts.dispatcher_dir:
+            disp['folder'] = os.path.abspath(os.path.expanduser(opts.dispatcher_dir))
+        elif not disp.get('folder'):
+            disp['folder'] = os.path.expanduser(f"~/agent-team/{cfg['repos'][0].replace('/', '-')}-dispatcher")
+    cfg = save_config(cfg, fill)
+    ensure_labels(cfg)
+    install_dispatcher(cfg, cfg['dispatcher']['folder'])
+    write_roles(cfg)
+    print_roles_table(cfg)
+    return 0
+
+
+def print_roles_table(cfg):
+    print('role | label | mode | N | paths | model | effort | merge | session')
+    for r in cfg['roles']:
+        n = f"{r['n']}/{r['hours']}h" if r['mode'] == 'checker' else '-'
+        print(f"{r['role']} | {r['label']} | {r['mode']} | {n} | {','.join(r['paths']) or '-'} | {r['model'] or '-'} | "
+              f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {r['session'] or 'MISSING'}")
+    d = cfg['dispatcher']
+    print(f"dispatcher | - | - | - | - | {d.get('model') or '-'} | {d.get('effort') or '-'} | - | "
+          f"{d['session'] or 'MISSING'} | folder {d['folder'] or '-'}")
+
+
+def cmd_role(cfg, opts):
+    """Add or change a role (or the dispatcher's session) in the config, then create its labels."""
+    name = opts.name.strip()
+
+    def change(raw):
+        if name.lower() == 'dispatcher':
+            disp = raw.setdefault('dispatcher', {})
+            for key in ('session', 'model', 'effort'):
+                if getattr(opts, key) is not None:
+                    disp[key] = getattr(opts, key)
+            return
+        roles = raw.setdefault('roles', [{**r, 'session': ''} for r in DEFAULT_ROLES])
+        entry = next((r for r in roles if r['role'].lower() == name.lower()), None)
+        if opts.remove:
+            if entry:
+                roles.remove(entry)
+            return
+        if entry is None:
+            entry = {'role': name, **copy.deepcopy(PRESETS.get(name.lower(), {}))}
+            roles.append(entry)
+        for key in ('label', 'mode', 'n', 'hours', 'model', 'release_model', 'effort', 'hard_effort', 'session',
+                    'description'):
+            if getattr(opts, key) is not None:
+                entry[key] = getattr(opts, key)
+        if opts.paths is not None:
+            entry['paths'] = [p.strip() for p in opts.paths.split(',') if p.strip()]
+        if opts.example:
+            entry['examples'] = opts.example
+        for path in opts.shot or []:
+            shots = entry.setdefault('shots', [])
+            file = f"{entry['role'].replace(' ', '-')}-{len(shots) + 1}{os.path.splitext(path)[1].lower()}"
+            os.makedirs(os.path.join(cfg['team_dir'], 'examples'), exist_ok=True)
+            with open(os.path.expanduser(path), 'rb') as src, open(os.path.join(cfg['team_dir'], 'examples', file), 'wb') as dst:
+                dst.write(src.read())
+            shots.append(file)
+        if opts.merge is not None:
+            entry['merge'] = opts.merge == 'yes'
+        if entry.get('mode') == 'checker' and not entry.get('since'):
+            entry['since'] = iso(now())
+        role_entry(entry)
+
+    cfg = save_config(cfg, change)
+    if len(cfg['roles']) == 0 or default_role(cfg) is None:
+        raise Fail('the default role is gone')
+    if not opts.remove:
+        ensure_labels(cfg)
+    write_roles(cfg)
+    print_roles_table(cfg)
+
+
+# ---------- main ----------
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog='agentq', description='Task queue of an agent team on GitHub issues.')
     p.add_argument('--config', help='config file (default: AGENTQ_CONFIG, the nearest .agentq.json, ~/.config/agentq/config.json)')
     sub = p.add_subparsers(dest='cmd', required=True)
-    q = sub.add_parser('queue', help='the queue and the owner\'s new comments')
+    q = sub.add_parser('queue', help="the queue and the owner's new comments")
     q.add_argument('--all', action='store_true', help='also count skipped issues by label')
     q.add_argument('--peek', action='store_true', help='do not move the "since" mark')
     sub.add_parser('take', help='start an issue').add_argument('issue')
@@ -300,16 +1208,78 @@ def main(argv=None):
     w.add_argument('other')
     c = sub.add_parser('check', help='find inconsistent states')
     c.add_argument('--fix', action='store_true')
-    sub.add_parser('setup', help='create the labels agentq uses')
+    wt = sub.add_parser('watch', help='poll the board every minute; print a plan and exit when there is work')
+    wt.add_argument('--once', action='store_true', help='poll once')
+    wt.add_argument('--interval', type=float, help='seconds between polls (default: poll_seconds)')
+    s = sub.add_parser('assign', help='give an issue to a role (working if the role is free, else queued)')
+    s.add_argument('issue')
+    s.add_argument('role')
+    b = sub.add_parser('brief', help="the issue's title, text, the owner's comments verbatim and screenshots as files")
+    b.add_argument('issue')
+    b.add_argument('--since', help="only the owner's comments from this time on")
+    r = sub.add_parser('route', help='not mine: give it to another role (records a lesson for the dispatcher)')
+    r.add_argument('issue')
+    r.add_argument('role')
+    r.add_argument('text', nargs='?')
+    r.add_argument('--no-lesson', action='store_true', help='a hand-over, not a mistake: record no lesson')
+    t = sub.add_parser('teach', help='a rule for the dispatcher, e.g. "banners → designer"')
+    t.add_argument('rule')
+    t.add_argument('--owner', action='store_true', help='the owner said it')
+    t.add_argument('--issue', help='ask a contradiction on this issue instead of a new one')
+    sub.add_parser('roles', help='the roles, rules and lessons the dispatcher reads')
+    dn = sub.add_parser('done', help='fixed: comment, drop the working label, close')
+    dn.add_argument('issue')
+    dn.add_argument('text')
+    bt = sub.add_parser('batch', help='create the batch issue for a checker-mode role')
+    bt.add_argument('role')
+    bt.add_argument('-R', '--repo')
+    bt.add_argument('--now', action='store_true', help='even if fewer than N and younger than the wait')
+    ck = sub.add_parser('checked', help="a checker's batch is done: label every listed issue, close the batch")
+    ck.add_argument('issue')
+    ck.add_argument('text', nargs='?')
+    sub.add_parser('health', help='watcher alive, no stale work; problems go to one health issue')
+    su = sub.add_parser('setup', help='check access, write default roles, create labels and the dispatcher folder')
+    su.add_argument('--checkout', help='the project folder (for path filters and pinned commits)')
+    su.add_argument('--dispatcher-dir', help='the dispatcher folder (default ~/agent-team/<owner>-<repo>-dispatcher)')
+    ro = sub.add_parser('role', help='add or change a role ("dispatcher" sets the dispatcher\'s session)')
+    ro.add_argument('name')
+    ro.add_argument('--label')
+    ro.add_argument('--mode', choices=MODES)
+    ro.add_argument('--n', type=int)
+    ro.add_argument('--hours', type=float)
+    ro.add_argument('--paths', help='comma-separated path prefixes or globs (checker mode)')
+    ro.add_argument('--model')
+    ro.add_argument('--release-model')
+    ro.add_argument('--effort', choices=EFFORTS)
+    ro.add_argument('--hard-effort', choices=EFFORTS)
+    ro.add_argument('--merge', choices=('yes', 'no'))
+    ro.add_argument('--session')
+    ro.add_argument('--description')
+    ro.add_argument('--example', action='append', help='an example task (repeat for 2–3)')
+    ro.add_argument('--shot', action='append', help='a reference screenshot, copied into the dispatcher\'s examples/')
+    ro.add_argument('--remove', action='store_true')
+    ini = sub.add_parser('init', help='install the team into this project only: config, skill link, git exclude')
+    ini.add_argument('--owner', action='append', required=True, help="the owner's GitHub login (repeat for more)")
+    ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
+    ini.add_argument('--project', help='the project folder (default: here)')
     opts = p.parse_args(argv)
+    if opts.cmd == 'init':
+        try:
+            cmd_init(opts)
+            return 0
+        except Fail as e:
+            print(f'agentq: {e}', file=sys.stderr)
+            return 1
+    commands = {'queue': cmd_queue, 'take': cmd_take, 'ask': cmd_ask, 'defer': cmd_defer, 'wait': cmd_wait,
+                'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
+                'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
+                'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role}
     try:
         cfg = load_config(find_config(opts.config))
-        {'queue': cmd_queue, 'take': cmd_take, 'ask': cmd_ask, 'defer': cmd_defer,
-         'wait': cmd_wait, 'check': cmd_check, 'setup': cmd_setup}[opts.cmd](cfg, opts)
+        return commands[opts.cmd](cfg, opts) or 0
     except Fail as e:
         print(f'agentq: {e}', file=sys.stderr)
         return 1
-    return 0
 
 
 if __name__ == '__main__':

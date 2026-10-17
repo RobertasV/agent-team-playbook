@@ -1,21 +1,72 @@
 {
   "owner_accounts": ["your-github-login"],
   "agent_account": "your-ai-account",
-  "role": "programmer",
   "repos": ["you/your-project"],
+  "checkout": "/path/to/your-project",
   "labels": {
     "working": "in progress",
     "question": "question for owner",
     "deferred": "deferred",
-    "waiting": "waiting for other project"
+    "waiting": "waiting for other project",
+    "priority": "priority",
+    "blocking": "blocking",
+    "hard": "hard",
+    "owner_word": "waits for owner's word",
+    "batch": "check batch",
+    "health": "agent health",
+    "checked": "checked: {role}"
   },
-  "skip_labels": ["after launch", "owner step", "needs decision"],
+  "skip_labels": ["after launch"],
+  "default_role": "programmer",
+  "roles": [
+    {
+      "role": "programmer",
+      "label": "programmer",
+      "mode": "programmer",
+      "model": "",
+      "effort": "high",
+      "hard_effort": "max",
+      "merge": true,
+      "session": "",
+      "description": "Default role: every task nobody else owns. The only role that interprets the owner's words."
+    },
+    {
+      "role": "checker",
+      "label": "checker",
+      "mode": "checker",
+      "n": 5,
+      "hours": 24,
+      "paths": [],
+      "model": "",
+      "release_model": "",
+      "effort": "high",
+      "merge": false,
+      "session": "",
+      "description": "Checks batches of finished tasks. The full release check runs only on the owner's word."
+    }
+  ],
+  "dispatcher": {
+    "folder": "",
+    "session": "",
+    "model": "",
+    "effort": "low"
+  },
+  "poll_seconds": 60,
   "stale_hours": 24,
+  "watch_grace_minutes": 30,
+  "lesson_examples": 5,
+  "accept_issues_from_others": false,
   "texts": {
     "take": "taking this.",
     "ask": "{text}",
     "defer": "deferred. {text}",
     "wait": "waiting for {ref}.",
-    "back": "{ref} is closed – back in the queue."
+    "back": "{ref} is closed – back in the queue.",
+    "assign": "→ {role}.",
+    "queued": "queued for {role}.",
+    "route": "→ {role}. {text}",
+    "batch_title": "Check: {refs}",
+    "checked": "checked {refs}. {text}",
+    "health_title": "Agent team health"
   }
 }

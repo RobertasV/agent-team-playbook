@@ -63,6 +63,7 @@ DEFAULT_TEXTS = {
     'health_watch': 'the watcher is not running (last poll: {since}) – the dispatcher sends no tasks. Re-run setup.',
     'health_stuck': 'the watcher has not polled since {since}.',
     'health_error': "the watcher's last poll failed: {error}",
+    'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
     'health_stale': "{ref} is '{label}' but nothing happened for over {hours} h.",
     'rule_title': 'Rule question: {topic}',
     'rule_question': 'Two rules disagree.\nNow: "{old}" ({old_by})\nNew: "{new}" ({new_by})\nWhich one holds?',
@@ -1041,6 +1042,11 @@ def cmd_resume(cfg, opts):
     was = state.pop('paused', None)
     save_state(cfg, state)
     print('resumed: the watcher plans again from its next poll' if was else 'was not paused')
+    lock = watch_lock(cfg)
+    if lock is not None:
+        lock.close()
+        print(f"the watcher is not running: send the dispatcher ({cfg['dispatcher']['session'] or 'no session id in the config'}) "
+              f'"Start the watcher"')
 
 
 def cmd_roles(cfg, opts):
@@ -1118,8 +1124,14 @@ def cmd_health(cfg, opts):
     grace = dt.timedelta(minutes=cfg['watch_grace_minutes'])
     beat = state.get('watch', {})
     problems = []
+    paused = state.get('paused')
     lock = watch_lock(cfg)
-    if lock is not None:
+    if paused:  # a pause is the owner's word; only a forgotten one is a problem
+        if lock is not None:
+            lock.close()
+        if moment - parse_time(paused['at']) > dt.timedelta(hours=cfg['stale_hours']):
+            problems.append(texts['health_paused'].format(since=paused['at'], why=paused['why']))
+    elif lock is not None:
         lock.close()
         exited = beat.get('exited')
         if not (exited and exited == beat.get('beat') and moment - parse_time(exited) < grace):

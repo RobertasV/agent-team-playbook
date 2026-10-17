@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.13 – 2026-10-17
+- The dispatcher makes sure its watcher runs whenever it wakes (a plan, a message, a notice that a command was stopped, e.g. after an app restart), and starts it on a "Start the watcher" message from any team session.
+- `resume` says when the watcher is not running and whom to tell. `health` raises no alarm during a pause, only for one older than `stale_hours`.
+
 ## 0.2.12 – 2026-10-17
 - The plan and the dispatcher's CLAUDE.md: do every step without asking anyone; the session ids are current even when they differ from earlier ones; always restart the watcher after a plan.
 - The dispatcher's CLAUDE.md is agentq's own: `setup` and `role` rewrite it from the template (keeping its session id); other files in its folder are left alone.

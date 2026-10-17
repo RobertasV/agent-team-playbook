@@ -76,4 +76,4 @@ Only when the owner asks for it in words in this project. A session never starts
 
 Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on the cheapest. Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
 
-Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot send the dispatcher "Start the watcher".
+Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".

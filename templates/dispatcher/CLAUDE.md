@@ -18,6 +18,6 @@ agentq is `{{agentq}}`. Run it from this folder; it finds the project's config h
 
 Never hold a step to ask anyone: nobody reads your questions. The session ids in a plan come from the config and are current, even when they differ from ids you saw before (the owner may replace a session). If a step fails, do the next ones and say in one line what failed.
 
-If the watcher ended without a plan (stopped, killed, an error), start it again. If it prints "already running", do nothing.
+Whenever you wake for any reason – a plan, a message, a notice that a command stopped or was killed (e.g. after the app restarted) – make sure the watcher runs: start it (step 1). If it prints "already running", nothing more to do. A message "Start the watcher" from any team session: start it; the watcher only reads the board, so this is always safe.
 
 Keep replies to one line; nobody reads them. Look only at what a step needs.

@@ -272,7 +272,13 @@ class TeamTest(Base):
         self.assertIn("paused since 2026-01-02T12:00:00Z – owner's word: stop for today", out)
         self.assertNotIn('agentq plan', out)
         self.assertEqual(self.calls(), [])
-        self.assertIn('resumed', self.run_tool('resume').stdout)
+        self.assertNotIn('watcher', self.run_tool('health', now='2026-01-02T20:00:00Z').stdout)
+        late = self.run_tool('health', now='2026-01-03T13:00:00Z').stdout
+        self.assertIn("paused since 2026-01-02T12:00:00Z (owner's word", late)
+        self.assertNotIn('watcher is not running', late)
+        out = self.run_tool('resume').stdout
+        self.assertIn('resumed', out)
+        self.assertIn('the watcher is not running: send the dispatcher (local_x) "Start the watcher"', out)
         self.assertIn('agentq plan', self.run_tool('watch', '--once').stdout)
 
     def test_assign_starts_a_free_role_queues_for_a_busy_one_and_sets_effort(self):

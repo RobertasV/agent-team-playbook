@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.3 – 2026-10-17
+- The skill no longer says how a session handles its context; that belongs to the tools, not the rules.
+
 ## 0.1.2 – 2026-10-17
 - A session no longer clears itself; a long context is compacted instead. State still goes to the issue, a file or memory after each task.
 

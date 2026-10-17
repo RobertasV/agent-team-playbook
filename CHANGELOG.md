@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.4 – 2026-10-17
+- `brief` includes the note of the role that handed the task over with `route` (e.g. "merge branch …"), so the next role gets it without reading the thread.
+
 ## 0.2.3 – 2026-10-17
 - The skill: install only when the owner asks for it in words in that project; a session never starts it on its own.
 

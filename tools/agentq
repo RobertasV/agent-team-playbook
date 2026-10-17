@@ -26,6 +26,7 @@ DEFAULT_CONFIG = os.path.expanduser('~/.config/agentq/config.json')
 PROJECT_CONFIG = '.agentq.json'
 FULL = 'Accept: application/vnd.github.full+json'
 WAIT_MARK = re.compile(r'<!-- agentq:wait ([\w.-]+/[\w.-]+)#(\d+) -->')
+ROUTE_MARK = '<!-- agentq:route -->'
 BATCH_MARK = re.compile(r'<!-- agentq:batch (\{.*?\}) -->')
 REF = re.compile(r'^(?:([\w.-]+/[\w.-]+)#)?#?(\d+)$')
 ARROW = re.compile(r'\s*(?:→|->)\s*')
@@ -778,6 +779,10 @@ def cmd_brief(cfg, opts):
         out += [f'Labels: {", ".join(names) or "none"}', f'--- issue text by {author} ({tag}) ---',
                 (issue.get('body') or '(empty)').strip()]
         shots += download_shots(issue.get('body_html'), folder, 1)
+    handover = [c for c in comments if login_of(c) == cfg['agent_account'] and ROUTE_MARK in (c.get('body') or '')]
+    if handover and not since:  # the note of the role that handed it over (e.g. "merge branch …")
+        c = handover[-1]
+        out += [f"--- handed over, {c['created_at']} ---", c['body'].replace(ROUTE_MARK, '').strip()]
     for c in picked:
         out += [f"--- the owner ({login_of(c)}), {c['created_at']} ---", (c.get('body') or '').strip()]
         shots += download_shots(c.get('body_html'), folder, len(shots) + 1)
@@ -863,7 +868,8 @@ def cmd_route(cfg, opts):
     who = old['role'] if old else cfg['role']
     remove = [r['label'] for r in cfg['roles'] if r is not target and r['label'] in names]
     remove += [cfg['labels']['working']] if cfg['labels']['working'] in names else []
-    comment(cfg, repo, number, cfg['texts']['route'].format(role=target['role'], text=opts.text or '').strip(), who)
+    text = cfg['texts']['route'].format(role=target['role'], text=opts.text or '').strip()
+    comment(cfg, repo, number, f'{text}\n{ROUTE_MARK}', who)
     relabel(repo, number, add=[target['label']], remove=remove)
     print(f"{repo}#{number} → {target['role']}")
     if opts.no_lesson or (old and old is target):

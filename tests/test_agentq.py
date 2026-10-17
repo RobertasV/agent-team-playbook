@@ -291,6 +291,8 @@ class TeamTest(Base):
             f'repos/{REPO}/issues/3/comments': [
                 {'user': {'login': 'boss'}, 'body': 'first words', 'body_html': '', 'created_at': '2026-01-02T08:00:00Z'},
                 {'user': {'login': 'bot'}, 'body': 'agent noise', 'body_html': img, 'created_at': '2026-01-02T09:00:00Z'},
+                {'user': {'login': 'bot'}, 'body': '🤖 marketer: → designer. texts in branch copy-1\n<!-- agentq:route -->',
+                 'body_html': '', 'created_at': '2026-01-02T09:30:00Z'},
                 {'user': {'login': 'boss'}, 'body': 'and red', 'body_html': img, 'created_at': '2026-01-02T10:00:00Z'}]}})
         out = self.run_tool('brief', '3').stdout
         self.assertIn('Task acme/app#3 for designer', out)
@@ -298,6 +300,8 @@ class TeamTest(Base):
         self.assertIn('first words', out)
         self.assertIn('and red', out)
         self.assertNotIn('agent noise', out)
+        self.assertIn('--- handed over, 2026-01-02T09:30:00Z ---\n🤖 marketer: → designer. texts in branch copy-1\n', out)
+        self.assertNotIn('agentq:route', out)
         self.assertIn('--no-lesson', out)
         files = [l for l in out.splitlines() if l.endswith('.png')]
         self.assertEqual(len(files), 2)
@@ -306,6 +310,7 @@ class TeamTest(Base):
         self.assertIn('and red', news)
         self.assertNotIn('first words', news)
         self.assertNotIn('bold', news)
+        self.assertNotIn('handed over', news)
 
     def test_route_relabels_and_keeps_the_last_five_lessons(self):
         for n in range(20, 27):
@@ -313,7 +318,7 @@ class TeamTest(Base):
             self.run_tool('route', str(n), 'designer', 'a logo')
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '26', '-R', REPO, '--add-label', 'design',
                                                              '--remove-label', 'prog', '--remove-label', 'doing'])
-        self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 programmer: → designer. a logo')
+        self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 programmer: → designer. a logo\n<!-- agentq:route -->')
         with open(os.path.join(self.dir.name, 'disp', 'lessons.json')) as f:
             kept = [e['issue'] for e in json.load(f)['examples']['designer']]
         self.assertEqual(kept, ['#22', '#23', '#24', '#25', '#26'])

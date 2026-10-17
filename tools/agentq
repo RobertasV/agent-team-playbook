@@ -173,6 +173,11 @@ def find_config(explicit):
         here = parent
 
 
+def number(text):
+    value = float(text)
+    return int(value) if value.is_integer() else value
+
+
 def role_entry(raw):
     role = {'label': raw['role'], 'mode': 'programmer', 'n': 5, 'hours': 24, 'paths': [], 'model': '',
             'release_model': '', 'effort': '', 'hard_effort': '', 'session': '', 'description': '', 'examples': [],
@@ -704,12 +709,12 @@ def cmd_assign(cfg, opts):
     names = labels_of(issue)
     labels = cfg['labels']
     remove = [r['label'] for r in cfg['roles'] if r is not role and r['label'] in names]
-    remove += [labels['question']] if labels['question'] in names else []
     ref = f'{repo}#{number}'
-    if opts.queue:
+    if opts.queue:  # sorting: the role label only; skip labels (question, deferred, …) stay
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, in its queue")
         return
+    remove += [labels['question']] if labels['question'] in names else []  # the owner answered
     busy = busy_with(cfg, board(repo), role, but=number)
     who = cfg['dispatcher']['name']
     if busy:
@@ -1227,7 +1232,7 @@ def cmd_setup(cfg, opts):
 def print_roles_table(cfg):
     print('role | label | mode | N | paths | model | effort | merge | session')
     for r in cfg['roles']:
-        n = f"{r['n']}/{r['hours']}h" if r['mode'] == 'checker' else '-'
+        n = f"{r['n']}/{float(r['hours']):g}h" if r['mode'] == 'checker' else '-'
         print(f"{r['role']} | {r['label']} | {r['mode']} | {n} | {','.join(r['paths']) or '-'} | {r['model'] or '-'} | "
               f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {r['session'] or 'MISSING'}")
     d = cfg['dispatcher']
@@ -1359,7 +1364,7 @@ def main(argv=None):
     ro.add_argument('--label')
     ro.add_argument('--mode', choices=MODES)
     ro.add_argument('--n', type=int)
-    ro.add_argument('--hours', type=float)
+    ro.add_argument('--hours', type=number)
     ro.add_argument('--paths', help='comma-separated path prefixes or globs (checker mode)')
     ro.add_argument('--model')
     ro.add_argument('--release-model')

@@ -274,9 +274,11 @@ class TeamTest(Base):
         self.assertIn('1. set_session_effort local_p high', self.run_tool('assign', '9', 'programmer').stdout)
         self.assertNotIn('set_session', self.run_tool('assign', '9', 'programmer').stdout)
         comments = len(self.calls(['issue', 'comment']))
+        self.data({REPO: {'open': [issue(4, 'Icon', ['ask owner', 'prog'])]}})
         self.run_tool('assign', '4', 'designer', '--queue')
         self.assertEqual(len(self.calls(['issue', 'comment'])), comments)
-        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '4', '-R', REPO, '--add-label', 'design'])
+        self.assertEqual(self.calls(['issue', 'edit'])[-1],
+                         ['issue', 'edit', '4', '-R', REPO, '--add-label', 'design', '--remove-label', 'prog'])
 
     def test_brief_gives_the_owners_words_verbatim_and_screenshots_as_files(self):
         shot = os.path.join(self.dir.name, 'pic.png')
@@ -438,12 +440,14 @@ class TeamTest(Base):
             f.write(b'png')
         self.run_tool('role', 'marketer', '--session', 'local_m', '--model', 'mid', '--shot', shot)
         self.run_tool('role', 'dispatcher', '--session', 'local_x2')
+        self.assertIn('checker | check | checker | 2/36h', self.run_tool('role', 'checker', '--hours', '36').stdout)
         with open(self.config) as f:
             cfg = json.load(f)
         marketer = cfg['roles'][-1]
         self.assertEqual((marketer['role'], marketer['session'], marketer['model']), ('marketer', 'local_m', 'mid'))
         self.assertIn('public or paid', marketer['description'])
         self.assertEqual(cfg['dispatcher']['session'], 'local_x2')
+        self.assertIs(type(cfg['roles'][2]['hours']), int)
         self.assertIn('marketer', [c[2] for c in self.calls(['label', 'create'])])
         self.assertTrue(os.path.exists(os.path.join(self.dir.name, 'disp', 'examples', 'marketer-1.png')))
         self.assertIn('reference screenshot: examples/marketer-1.png', self.run_tool('roles').stdout)

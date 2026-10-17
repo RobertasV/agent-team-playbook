@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 – 2026-10-17
+- `assign --queue` (sorting at setup) adds the role label only and drops another role's label; it never removes a skip label such as the question for the owner.
+- `role --hours 24` stores a whole number; the roles table shows `5/24h`.
+
 ## 0.2.0 – 2026-10-17
 - New team design (docs/DESIGN.md): a cheap dispatcher sends tasks, the programmer is the default role, a checker checks batches, a ready-made marketer, owner-defined roles in programmer or checker mode.
 - `agentq watch`: polls the board every minute without tokens and prints a plan when there is work; ignores the AI account's own comments.

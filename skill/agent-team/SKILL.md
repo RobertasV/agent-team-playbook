@@ -34,6 +34,8 @@ A checker: check each listed task at the pinned commit. Each problem → a new i
 
 New words from the owner on your task arrive the same way. A message waits while you talk with the owner directly.
 
+Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks; during install the programmer may message the sessions it starts.
+
 ## The owner's words
 
 - A question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.8 – 2026-10-17
+- The skill: team sessions never message each other; the board carries hand-overs and questions. Only the dispatcher sends tasks.
+
 ## 0.2.7 – 2026-10-17
 - Every role runs on the strongest model at extra-high effort (`xhigh`, `max` for *hard* issues); only the dispatcher stays on the cheapest. Defaults, the skill, README and design updated.
 

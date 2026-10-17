@@ -638,11 +638,14 @@ def build_plan(cfg, state, start):
                             '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments'):
             answered_at = max([c['createdAt'] for c in item.get('comments', [])
                                if login_of(c) == cfg['agent_account']] or [''])
+            # first run: only words on an open issue that waits for the owner or is in progress, with no agent
+            # comment after them, may not have reached a role; everything else counts as delivered
+            open_wait = item.get('state', 'OPEN') == 'OPEN' and (waiting_word | {labels['working']}) & set(labels_of(item))
             for c in item.get('comments', []):
                 if login_of(c) not in owners or not window <= parse_time(c['createdAt']) <= start:
                     continue
-                if first and c['createdAt'] < answered_at:
-                    fresh.append(c)  # first run: an agent wrote on the issue after it, so it reached a role
+                if first and (c['createdAt'] < answered_at or not open_wait):
+                    fresh.append(c)
                 elif first or comment_key(c) not in delivered[repo]:
                     news.setdefault(item['number'], (item, []))[1].append(c['createdAt'])
         if first:

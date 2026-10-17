@@ -615,7 +615,8 @@ def build_plan(cfg, state, start):
 
 def render_plan(cfg, plan, start):
     q = 'agentq'
-    lines = [f'agentq plan {iso(start)} – do each step in order:']
+    lines = [f'agentq plan {iso(start)} – do every step in order, without asking anyone. The session ids come from '
+             f'the config and are current, even when they differ from ids you saw before (the owner may replace a session).']
     for n, (kind, ref, role, title, since) in enumerate(plan, 1):
         if kind == 'forward':
             lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send the output of '
@@ -1174,18 +1175,25 @@ def ensure_labels(cfg):
 
 
 def install_dispatcher(cfg, folder):
-    """Copy the dispatcher's template (only missing files), link the config, write roles.md."""
+    """Copy the dispatcher's template, link the config. CLAUDE.md is agentq's own and follows the template;
+    other files (examples/) are copied only when missing."""
     folder = os.path.abspath(os.path.expanduser(folder))
     agentq = os.path.realpath(__file__)
     for base, _, files in os.walk(TEMPLATE):
         for name in files:
             source = os.path.join(base, name)
             target = os.path.join(folder, os.path.relpath(source, TEMPLATE))
-            if os.path.exists(target):
+            managed = name == 'CLAUDE.md' and base == TEMPLATE
+            if os.path.exists(target) and not managed:
                 continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(source, encoding='utf-8') as f:
                 text = f.read().replace('{{agentq}}', agentq).replace('{{default_role}}', cfg['default_role'])
+            if os.path.exists(target):
+                with open(target, encoding='utf-8') as f:
+                    old = SESSION_BLOCK.sub('<!-- agentq:session -->\n<!-- /agentq:session -->\n', f.read(), count=1)
+                if old == text:
+                    continue
             with open(target, 'w', encoding='utf-8') as f:
                 f.write(text)
             print(f'dispatcher: {target} written')
@@ -1375,6 +1383,8 @@ def cmd_role(cfg, opts):
         raise Fail('the default role is gone')
     if not opts.remove:
         ensure_labels(cfg)
+    if cfg['dispatcher']['folder'] and os.path.isdir(cfg['team_dir']):
+        install_dispatcher(cfg, cfg['dispatcher']['folder'])
     sync_dispatcher_session(cfg)
     write_roles(cfg)
     print_roles_table(cfg)

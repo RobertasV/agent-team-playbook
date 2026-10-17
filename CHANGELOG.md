@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12 – 2026-10-17
+- The plan and the dispatcher's CLAUDE.md: do every step without asking anyone; the session ids are current even when they differ from earlier ones; always restart the watcher after a plan.
+- The dispatcher's CLAUDE.md is agentq's own: `setup` and `role` rewrite it from the template (keeping its session id); other files in its folder are left alone.
+
 ## 0.2.11 – 2026-10-17
 - `agentq pause "why"` / `agentq resume`: any session can pause the team on the owner's word; the watcher stays up and sends nothing. No session has to ask the dispatcher to stop its watcher.
 

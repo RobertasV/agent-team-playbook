@@ -223,6 +223,7 @@ class TeamTest(Base):
     def test_watch_plan_assigns_classifies_batches_and_forwards_owner_words(self):
         self.data(self.board())
         first = self.run_tool('watch', '--once', now=T0).stdout
+        self.assertIn('without asking anyone. The session ids come from the config and are current', first)
         self.assertIn(f'next task for programmer: run `agentq assign {REPO}#2 programmer`', first)
         self.assertNotIn(f'{REPO}#1 programmer', first)
         self.assertNotIn('designer:', first)
@@ -241,7 +242,8 @@ class TeamTest(Base):
         self.assertIn(f'the owner answered on {REPO}#6: run `agentq assign {REPO}#6 programmer`', second)
         self.assertNotIn(f'assign {REPO}#2', second)
         third = self.run_tool('watch', '--once', now=T2).stdout
-        self.assertNotIn('the owner', third)
+        self.assertNotIn('the owner wrote', third)
+        self.assertNotIn('the owner answered', third)
 
     def test_watch_without_work_keeps_polling_and_a_second_watcher_steps_back(self):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(7, 'Busy', ['prog', 'doing'])]}})
@@ -483,6 +485,12 @@ class TeamTest(Base):
         self.assertIn('Your own session id is `local_y`.', claude)
         self.assertTrue(claude.startswith('# Dispatcher\n\n<!-- agentq:session -->'))
         self.assertIn('\n\nYou are the dispatcher', claude)
+        self.assertIn('Never hold a step to ask anyone', claude)
+        with open(os.path.join(disp, 'examples', 'README.md'), 'w') as f:
+            f.write('my own notes')
+        self.run_tool('role', 'dispatcher', '--session', 'local_y')
+        self.assertIn('Your own session id is `local_y`.', open(os.path.join(disp, 'CLAUDE.md')).read())
+        self.assertEqual(open(os.path.join(disp, 'examples', 'README.md')).read(), 'my own notes')
         self.assertTrue(os.path.exists(os.path.join(disp, 'examples', 'README.md')))
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())

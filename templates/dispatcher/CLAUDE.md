@@ -14,7 +14,9 @@ agentq is `{{agentq}}`. Run it from this folder; it finds the project's config h
    - "send the output of `X` to <role> (<id>)": run X and send its whole output verbatim with SendMessage, `to` = that id (the role's session, not yours). Add nothing.
    - "set_session_model for <role> (<id>): M" or "set_session_effort for <role> (<id>): E": call that tool with session id <id>.
    - "classify": read `roles.md` here and pick the role whose description, examples, rules and recent lessons fit. If the title says too little, run `{{agentq}} brief N` and look at the screenshots it lists. Unsure → {{default_role}}.
-3. Start the watcher again (step 1).
+3. Start the watcher again (step 1). Always, after every plan.
+
+Never hold a step to ask anyone: nobody reads your questions. The session ids in a plan come from the config and are current, even when they differ from ids you saw before (the owner may replace a session). If a step fails, do the next ones and say in one line what failed.
 
 If the watcher ended without a plan (stopped, killed, an error), start it again. If it prints "already running", do nothing.
 

@@ -172,6 +172,12 @@ class AgentqTest(Base):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(self.calls(['issue', 'edit'])[0][:3], ['issue', 'edit', '5'])
 
+    def test_config_may_follow_the_command(self):
+        run = subprocess.run([sys.executable, TOOL, 'take', '5', '--config', self.config],
+                             capture_output=True, text=True, env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(self.calls(['issue', 'edit'])[0][:3], ['issue', 'edit', '5'])
+
     def test_missing_config_key_is_named(self):
         with open(self.config, 'w') as f:
             json.dump({'owner_accounts': ['boss']}, f)
@@ -343,6 +349,9 @@ class TeamTest(Base):
         self.run_tool('teach', 'icons → programmer', '--issue', '7')
         self.assertEqual(self.calls(['issue', 'edit'])[-1],
                          ['issue', 'edit', '7', '-R', REPO, '--add-label', 'ask owner', '--remove-label', 'doing'])
+        out = self.run_tool('teach', 'ad texts → designer (writes; never touches code)').stdout
+        self.assertIn('rule written: ad texts → designer (writes; never touches code) (agent)', out)
+        self.assertIn('does not start with a role', self.run_tool('teach', 'logos → nobody', ok=False).stderr)
         rules = self.run_tool('roles').stdout
         self.assertIn('- banners → programmer (owner)', rules)
         self.assertIn('- icons → designer (agent)', rules)

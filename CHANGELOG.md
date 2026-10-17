@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5 – 2026-10-17
+- `--config` works after the command too (`agentq init --owner X --config file`).
+- `teach "topic → role (note)"`: the role is the name the text after the arrow starts with; a note may follow it.
+
 ## 0.2.4 – 2026-10-17
 - `brief` includes the note of the role that handed the task over with `route` (e.g. "merge branch …"), so the next role gets it without reading the thread.
 

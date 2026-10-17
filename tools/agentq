@@ -882,13 +882,22 @@ def cmd_route(cfg, opts):
     print(f"lesson recorded for the dispatcher: #{number} is {target['role']}'s, not {who}'s")
 
 
+def rule_role(cfg, rest):
+    """The role a rule points to: the role name it starts with; anything after it is a note ("designer (writes only)")."""
+    hits = [r['role'] for r in cfg['roles'] if re.match(rf'{re.escape(r["role"])}(?!\w)', rest.strip(), re.I)]
+    if not hits:
+        raise Fail(f'"{rest}" does not start with a role (roles: {", ".join(r["role"] for r in cfg["roles"])}); '
+                   f'write "topic → role", a note may follow the role')
+    return max(hits, key=len)
+
+
 def cmd_teach(cfg, opts):
     text = ' '.join(opts.rule.split())
     by = 'owner' if opts.owner else 'agent'
     parts = ARROW.split(text, maxsplit=1)
-    topic, role = (parts[0].lower(), role_by_name(cfg, parts[1])['role']) if len(parts) == 2 else (None, None)
+    topic, role = (parts[0].lower(), rule_role(cfg, parts[1])) if len(parts) == 2 else (None, None)
     if role:
-        text = f'{parts[0]} → {role}'
+        text = f'{parts[0]} → {parts[1]}'
     lessons = load_lessons(cfg)
     rules = lessons['rules']
     same = [r for r in rules if (topic and r.get('topic') == topic) or r['text'].lower() == text.lower()]
@@ -1331,6 +1340,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog='agentq', description='Task queue of an agent team on GitHub issues.')
     p.add_argument('--config', help='config file (default: AGENTQ_CONFIG, the nearest .agentq.json, ~/.config/agentq/config.json)')
     sub = p.add_subparsers(dest='cmd', required=True)
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument('--config', default=argparse.SUPPRESS, help='config file (also accepted before the command)')
+    add_parser = sub.add_parser
+    sub.add_parser = lambda *a, **k: add_parser(*a, parents=[common], **k)
     q = sub.add_parser('queue', help="the queue and the owner's new comments")
     q.add_argument('--all', action='store_true', help='also count skipped issues by label')
     q.add_argument('--peek', action='store_true', help='do not move the "since" mark')

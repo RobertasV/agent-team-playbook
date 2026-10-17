@@ -491,7 +491,9 @@ class LinkTest(Base):
         self.assertEqual(self.body(made), f'moved here from {REPO}#4.\n\nthe text')
         closing = self.calls(['issue', 'close'])[-1]
         self.assertEqual(closing[:4], ['issue', 'close', '4', '-R'])
-        self.assertIn(f'🤖 programmer: → {OTHER}#9', closing)
+        self.assertIn(f'🤖 dispatcher: → {OTHER}#9', closing)
+        self.assertNotIn('lesson', self.run_tool('roles').stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.dir.name, 'disp', 'lessons.json')))
 
     def test_split_creates_the_other_part_with_a_link_back(self):
         self.run_tool('link', OTHER, 'the website')

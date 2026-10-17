@@ -924,7 +924,8 @@ def cmd_move(cfg, opts):
     target = linked(cfg, opts.repo)
     issue = view(repo, number)
     names = labels_of(issue)
-    who = holder(cfg, issue)
+    owner = role_of_labels(cfg, names)  # no role label: the dispatcher is classifying it
+    who = owner['role'] if owner else cfg['dispatcher']['name']
     ref = f'{repo}#{number}'
     comment(cfg, repo, number, cfg['texts']['moved'].format(repo=target, text=opts.text or '').strip(), who)
     ours = [r['label'] for r in cfg['roles']] + [cfg['labels']['working']]
@@ -937,7 +938,7 @@ def cmd_move(cfg, opts):
         gh('issue', 'close', str(number), '-R', repo, '--reason', 'not planned', '--comment', f'🤖 {who}: → {target}#{new}')
         url = f'{target}#{new}'
     print(f'{ref} → {url}')
-    if who != cfg['dispatcher']['name'] and not opts.no_lesson:
+    if owner and not opts.no_lesson:
         lessons = load_lessons(cfg)
         moved = lessons['examples'].setdefault('@moved', [])
         moved.append({'issue': f'#{number}', 'title': one_line(issue['title'], 100), 'to': target})

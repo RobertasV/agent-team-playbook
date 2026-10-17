@@ -14,7 +14,7 @@ This skill applies only to the projects listed in the owner's `agentq` config. E
 - **Checker** – a separate session that tests a release candidate. Fixes nothing, ships nothing.
 - **Rules reviewer** – reviews changes to text that agents read, afterwards and in batches.
 
-One session per role. Sessions are visible to the owner; no hidden sub-agents. Between unrelated tasks a session clears its context (`/clear`); what must survive lives in issues, files and memory, not in the conversation.
+One session per role. Sessions are visible to the owner; no hidden sub-agents. When a task is done, the session clears its own context (the app's clear-session tool on itself, or `/clear`) – the owner never has to. First it writes what must survive into the issue, a file or memory; nothing in the conversation survives.
 
 ## The owner's words
 

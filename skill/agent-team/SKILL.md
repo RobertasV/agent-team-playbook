@@ -34,9 +34,12 @@ A checker: check each listed task at the pinned commit. Each problem → a new i
 
 New words from the owner on your task arrive the same way. A message waits while you talk with the owner directly.
 
-Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks; during install the programmer may message the sessions it starts.
+Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks. Exceptions: during install the programmer may message the sessions it starts, and any session may send the dispatcher "Start the watcher".
 
-To pause the team (the owner's word): `agentq pause "why"`; the watcher keeps running but sends nothing until `agentq resume`. Never ask the dispatcher to stop its watcher.
+The owner stops or starts the team with one word to any team session:
+- "stop" → `agentq pause "<owner's words>"` – the watcher keeps running but sends nothing;
+- "go" → `agentq resume`; when it says the watcher is not running, send the dispatcher it names "Start the watcher" yourself.
+The owner never has to message the dispatcher. Never ask the dispatcher to stop its watcher.
 
 ## The owner's words
 

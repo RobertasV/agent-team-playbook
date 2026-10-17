@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.14 – 2026-10-17
+- Stop and go in one word: the owner says "stop" or "go" to any team session; it runs `pause` / `resume` and, if needed, tells the dispatcher "Start the watcher" itself.
+
 ## 0.2.13 – 2026-10-17
 - The dispatcher makes sure its watcher runs whenever it wakes (a plan, a message, a notice that a command was stopped, e.g. after an app restart), and starts it on a "Start the watcher" message from any team session.
 - `resume` says when the watcher is not running and whom to tell. `health` raises no alarm during a pause, only for one older than `stale_hours`.

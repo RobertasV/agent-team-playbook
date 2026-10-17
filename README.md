@@ -61,7 +61,7 @@ Nothing is installed outside the project and the two folders above. To uninstall
 
 ## Daily use
 
-You write issues and comments. Labels you may use if you like: `priority`, `blocking`, `hard` (highest effort), `deferred`. To give a rule to the dispatcher, say it to any session, e.g. "banners go to the designer". The session runs `agentq teach --owner "banners → designer"`.
+You write issues and comments. To stop or restart the whole team, say "stop" or "go" to any team session; it pauses or resumes the dispatcher's work and restarts the watcher when needed. Labels you may use if you like: `priority`, `blocking`, `hard` (highest effort), `deferred`. To give a rule to the dispatcher, say it to any session, e.g. "banners go to the designer". The session runs `agentq teach --owner "banners → designer"`.
 
 The commands agents use:
 

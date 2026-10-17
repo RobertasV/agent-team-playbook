@@ -442,6 +442,57 @@ class TeamTest(Base):
             self.assertNotIn('checker', [r['role'] for r in json.load(f)['roles']])
 
 
+class LinkTest(Base):
+    def setUp(self):
+        super().setUp()
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg.update({'roles': ROLES, 'dispatcher': {'folder': os.path.join(self.dir.name, 'disp')}})
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+
+    def test_sharing_is_off_until_a_link_is_added(self):
+        self.data({REPO: {'open': [issue(4, 'New page')]}})
+        self.assertNotIn('move', self.run_tool('watch', '--once').stdout)
+        run = self.run_tool('move', '4', OTHER, ok=False)
+        self.assertIn('not a linked project', run.stderr)
+        self.run_tool('link', OTHER, 'the website: pages, blog')
+        self.assertIn(f'- {OTHER}: the website: pages, blog', self.run_tool('roles').stdout)
+        self.assertIn(f'run `agentq move {REPO}#4 <owner/repo>` instead', self.run_tool('watch', '--once').stdout)
+        self.run_tool('link', OTHER, '--remove')
+        self.assertNotIn(OTHER, self.run_tool('roles').stdout)
+
+    def test_move_transfers_without_our_labels_and_teaches_the_dispatcher(self):
+        self.run_tool('link', OTHER, 'the website')
+        self.data({REPO: {'open': [issue(4, 'New blog page', ['prog', 'doing', 'priority'])]}, OTHER: {'next': 9}})
+        out = self.run_tool('move', '4', OTHER, 'it is a page').stdout
+        self.assertIn(f'{REPO}#4 → https://github.com/{OTHER}/issues/9', out)
+        self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), f'🤖 programmer: moved to {OTHER}. it is a page')
+        self.assertEqual(self.calls(['issue', 'edit'])[-1],
+                         ['issue', 'edit', '4', '-R', REPO, '--remove-label', 'prog', '--remove-label', 'doing'])
+        self.assertIn(f'#4 New blog page → {OTHER}', self.run_tool('roles').stdout)
+
+    def test_move_copies_and_closes_when_github_refuses_the_transfer(self):
+        self.run_tool('link', OTHER, 'the website')
+        self.data({REPO: {'open': [issue(4, 'New page', body='the text')], 'transfer_fails': True}, OTHER: {'next': 9}})
+        self.run_tool('move', '4', OTHER)
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertEqual(made[made.index('-R') + 1], OTHER)
+        self.assertEqual(self.body(made), f'moved here from {REPO}#4.\n\nthe text')
+        closing = self.calls(['issue', 'close'])[-1]
+        self.assertEqual(closing[:4], ['issue', 'close', '4', '-R'])
+        self.assertIn(f'🤖 programmer: → {OTHER}#9', closing)
+
+    def test_split_creates_the_other_part_with_a_link_back(self):
+        self.run_tool('link', OTHER, 'the website')
+        self.data({REPO: {'open': [issue(4, 'Launch', ['prog', 'doing'])]}, OTHER: {'next': 12}})
+        self.assertIn(f'{OTHER}#12 created from {REPO}#4', self.run_tool('split', '4', OTHER, 'Launch page', 'a page for the launch').stdout)
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertEqual(self.body(made), f'🤖 programmer: a page for the launch\n\nSplit from {REPO}#4.')
+        self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), f'🤖 programmer: the part for {OTHER} is {OTHER}#12.')
+        self.assertEqual(self.calls(['issue', 'edit']), [])
+
+
 class InitTest(Base):
     def test_init_installs_into_one_project_only(self):
         project = os.path.join(self.dir.name, 'proj')

@@ -32,6 +32,11 @@ elif args[:2] == ['issue', 'view']:
     print(json.dumps(found))
 elif args[:2] == ['issue', 'create']:
     print(f"https://github.com/{opt('-R')}/issues/{repo.get('next', 100)}")
+elif args[:2] == ['issue', 'transfer']:
+    if repo.get('transfer_fails'):
+        print('cannot transfer between accounts', file=sys.stderr)
+        sys.exit(1)
+    print(f"https://github.com/{args[3]}/issues/{data.get(args[3], {}).get('next', 100)}")
 elif args[:2] == ['label', 'list']:
     print(json.dumps([{'name': n} for n in repo.get('labels', [])]))
 elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['issue', 'close'], ['label', 'create']):

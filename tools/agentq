@@ -74,6 +74,13 @@ DEFAULT_TEXTS = {
                        '- ready: push a branch, then `agentq route {ref} {default} "merge branch …: what changed, how it was checked" --no-lesson`\n'
                        '- stuck: `agentq ask {ref} "question"`\n'
                        '- not yours: `agentq route {ref} <role> "why"`'),
+    'finish_links': ('- all of it belongs to a linked project: `agentq move {ref} other/repo "why"`\n'
+                     '- a part belongs to a linked project: `agentq split {ref} other/repo "title" "what is needed there"`, '
+                     'update this task to what stays here, then carry on (or `agentq wait {ref} other/repo#M`)'),
+    'moved': 'moved to {repo}. {text}',
+    'moved_copy': 'moved here from {ref}.',
+    'split': 'the part for {repo} is {other}.',
+    'split_from': 'Split from {ref}.',
     'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new issue that links '
                      'the original (`gh issue create`, body "From the check of #N: …"); never reopen the original.\n'
                      'Finish with: `agentq checked {ref} "short summary"`'),
@@ -205,6 +212,7 @@ def load_config(path):
     cfg['poll_seconds'] = cfg.get('poll_seconds', 60)
     cfg['watch_grace_minutes'] = cfg.get('watch_grace_minutes', 30)
     cfg['lesson_examples'] = cfg.get('lesson_examples', 5)
+    cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
     cfg['shots_dir'] = os.path.expanduser(cfg.get('shots_dir') or os.path.join(os.path.dirname(cfg['state_file']), 'shots'))
@@ -609,8 +617,10 @@ def render_plan(cfg, plan, start):
             lines.append(f'{n}. a batch is ready for {role["role"]}: run `{q} batch {role["role"]} -R {ref}` '
                          f'and do what it prints.')
         else:
+            moving = (f' If all of it belongs to a linked project in roles.md, run `{q} move {ref} <owner/repo>` '
+                      f'instead.') if cfg['links'] else ''
             lines.append(f'{n}. classify {ref} "{one_line(title, 80)}": pick a role (roles.md; unsure → '
-                         f'{cfg["default_role"]}), run `{q} assign {ref} <role>` and do what it prints.')
+                         f'{cfg["default_role"]}), run `{q} assign {ref} <role>` and do what it prints.{moving}')
     lines.append(f'Last: start `{q} watch` again in the background.')
     return '\n'.join(lines)
 
@@ -762,6 +772,8 @@ def cmd_brief(cfg, opts):
         batch = BATCH_MARK.search(issue.get('body') or '')
         finish = 'finish_batch' if batch else 'finish' if role['merge'] else 'finish_handoff'
         out += ['---', texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
+        if cfg['links'] and not batch:
+            out.append(texts['finish_links'].format(ref=ref))
     print('\n'.join(out))
 
 
@@ -796,6 +808,15 @@ def render_roles(cfg, lessons):
         if routed:
             lines.append('Routed here by a role that got it by mistake:')
             lines += [f"- {e['issue']} {e['title']} (not {e['from']})" for e in routed]
+        lines.append('')
+    if cfg['links']:
+        lines.append('## Linked projects (sharing on)')
+        lines.append('A task that belongs wholly to one of these moves there; a mixed one goes to the default role.')
+        lines += [f"- {l['repo']}: {l['about']}" for l in cfg['links']]
+        moved = lessons['examples'].get('@moved', [])
+        if moved:
+            lines.append('Moved there by a role after it came here:')
+            lines += [f"- {e['issue']} {e['title']} → {e['to']}" for e in moved]
         lines.append('')
     lines.append('## Rules')
     lines += [f"- {r['text']} ({r['by']})" for r in lessons['rules']] or ['- none yet']
@@ -878,6 +899,72 @@ def cmd_teach(cfg, opts):
     rules.append({'text': text, 'topic': topic, 'role': role, 'by': by, 'at': iso(now())})
     save_lessons(cfg, lessons)
     print(f'rule written: {text} ({by})')
+
+
+def linked(cfg, repo):
+    if repo not in [l['repo'] for l in cfg['links']]:
+        raise Fail(f'{repo} is not a linked project (links: {", ".join(l["repo"] for l in cfg["links"]) or "none"}; '
+                   f'agentq link adds one)')
+    return repo
+
+
+def cmd_move(cfg, opts):
+    """All of it belongs to a linked project: transfer the issue there (or copy and close when GitHub refuses)."""
+    repo, number = resolve(cfg, opts.issue)
+    target = linked(cfg, opts.repo)
+    issue = view(repo, number)
+    names = labels_of(issue)
+    who = holder(cfg, issue)
+    ref = f'{repo}#{number}'
+    comment(cfg, repo, number, cfg['texts']['moved'].format(repo=target, text=opts.text or '').strip(), who)
+    ours = [r['label'] for r in cfg['roles']] + [cfg['labels']['working']]
+    relabel(repo, number, remove=[n for n in names if n in ours])
+    try:
+        url = gh('issue', 'transfer', str(number), target, '-R', repo).strip().splitlines()[-1]
+    except Fail:
+        body = f"{cfg['texts']['moved_copy'].format(ref=ref)}\n\n{issue.get('body') or ''}"
+        new = create_issue(target, issue['title'], body, [])
+        gh('issue', 'close', str(number), '-R', repo, '--reason', 'not planned', '--comment', f'🤖 {who}: → {target}#{new}')
+        url = f'{target}#{new}'
+    print(f'{ref} → {url}')
+    if who != cfg['dispatcher']['name'] and not opts.no_lesson:
+        lessons = load_lessons(cfg)
+        moved = lessons['examples'].setdefault('@moved', [])
+        moved.append({'issue': f'#{number}', 'title': one_line(issue['title'], 100), 'to': target})
+        del moved[:-int(cfg['lesson_examples'])]
+        save_lessons(cfg, lessons)
+        print(f'lesson recorded for the dispatcher: #{number} belonged to {target}')
+
+
+def cmd_split(cfg, opts):
+    """A part belongs to a linked project: a new issue there that links back; this one stays."""
+    repo, number = resolve(cfg, opts.issue)
+    target = linked(cfg, opts.repo)
+    ref = f'{repo}#{number}'
+    who = holder(cfg, view(repo, number))
+    body = f"🤖 {who}: {opts.text}\n\n{cfg['texts']['split_from'].format(ref=ref)}"
+    new = create_issue(target, opts.title, body, [])
+    comment(cfg, repo, number, cfg['texts']['split'].format(repo=target, other=f'{target}#{new}'), who)
+    print(f'{target}#{new} created from {ref}; {ref} stays here')
+
+
+def cmd_link(cfg, opts):
+    """Sharing between projects: add, change or remove a linked project in this project's config."""
+    def change(raw):
+        links = [l for l in raw.get('links', []) if l['repo'] != opts.repo]
+        if not opts.remove:
+            if not re.match(r'^[\w.-]+/[\w.-]+$', opts.repo):
+                raise Fail(f'"{opts.repo}" must be owner/repo')
+            if not opts.about:
+                raise Fail('say what belongs there, e.g. "the website: pages, blog, SEO"')
+            links.append({'repo': opts.repo, 'about': opts.about})
+        raw['links'] = links
+    cfg = save_config(cfg, change)
+    write_roles(cfg)
+    for l in cfg['links']:
+        print(f"{l['repo']}: {l['about']}")
+    if not cfg['links']:
+        print('no linked projects: sharing is off')
 
 
 def cmd_roles(cfg, opts):
@@ -1227,6 +1314,20 @@ def main(argv=None):
     t.add_argument('--owner', action='store_true', help='the owner said it')
     t.add_argument('--issue', help='ask a contradiction on this issue instead of a new one')
     sub.add_parser('roles', help='the roles, rules and lessons the dispatcher reads')
+    mv = sub.add_parser('move', help='all of it belongs to a linked project: move the issue there')
+    mv.add_argument('issue')
+    mv.add_argument('repo')
+    mv.add_argument('text', nargs='?')
+    mv.add_argument('--no-lesson', action='store_true')
+    sp = sub.add_parser('split', help='a part belongs to a linked project: a new issue there, linked to this one')
+    sp.add_argument('issue')
+    sp.add_argument('repo')
+    sp.add_argument('title')
+    sp.add_argument('text')
+    ln = sub.add_parser('link', help='share tasks with another project (sharing is on while a link exists)')
+    ln.add_argument('repo')
+    ln.add_argument('about', nargs='?', help='what belongs there')
+    ln.add_argument('--remove', action='store_true')
     dn = sub.add_parser('done', help='fixed: comment, drop the working label, close')
     dn.add_argument('issue')
     dn.add_argument('text')
@@ -1273,7 +1374,8 @@ def main(argv=None):
     commands = {'queue': cmd_queue, 'take': cmd_take, 'ask': cmd_ask, 'defer': cmd_defer, 'wait': cmd_wait,
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
-                'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role}
+                'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
+                'link': cmd_link}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

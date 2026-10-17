@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.2.15 – 2026-10-17
+- The first watch (no delivery record yet) counts an owner's comment as delivered only when an agent wrote on the issue after it, so words written during a pause or before an upgrade still reach a role.
 - An owner's comment stays in the plan until a `brief` delivers it (up to `forward_hours`, 24): a plan the dispatcher missed, or a comment written while no watcher ran, is no longer lost; the plan wakes the dispatcher again every `repeat_minutes`.
 - A working label set by someone other than the agent account (e.g. the owner's own tools) no longer makes a role busy.
 - The owner's answer on an issue waiting for the owner's word (the question or the owner-word label, also when both are one label) puts it back to its role; `assign` removes both labels.

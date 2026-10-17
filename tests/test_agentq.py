@@ -212,7 +212,8 @@ class TeamTest(Base):
             issue(1, 'Old bug', ['prog']),
             issue(2, 'Urgent bug', ['prog', 'priority']),
             issue(3, 'Banner', ['design', 'doing'], comments=[said('boss', 'old', '2026-01-02T08:00:00Z'),
-                                                              said('boss', 'recent', '2026-01-02T11:55:00Z')]),
+                                                              said('boss', 'recent', '2026-01-02T11:55:00Z'),
+                                                              said('bot', '🤖 designer: on it', '2026-01-02T11:58:00Z')]),
             issue(4, 'Something new', comments=[said('bot', '🤖 programmer: noted', '2026-01-02T11:00:00Z')]),
             issue(5, 'Spam', author='stranger'),
             issue(6, 'Which colour?', ['prog', 'ask owner']),
@@ -251,6 +252,16 @@ class TeamTest(Base):
         later = self.run_tool('watch', '--once', now='2026-01-02T12:40:00Z').stdout
         self.assertNotIn('the owner wrote', later)  # delivered by the brief
         self.assertIn(f'the owner answered on {REPO}#6', later)  # not delivered yet: it stays in the plan
+
+    def test_the_first_watch_forwards_only_words_no_agent_answered(self):
+        self.data({REPO: {'open': [
+            issue(3, 'Banner', ['design', 'doing'], comments=[said('boss', 'seen', '2026-01-02T09:00:00Z'),
+                                                              said('bot', '🤖 designer: ok', '2026-01-02T09:30:00Z')]),
+            issue(6, 'Which colour?', ['prog', 'ask owner'], comments=[said('bot', '🤖 programmer: which?', '2026-01-02T08:00:00Z'),
+                                                                        said('boss', 'blue', '2026-01-02T10:00:00Z')])]}})
+        first = self.run_tool('watch', '--once').stdout
+        self.assertIn(f'the owner answered on {REPO}#6', first)
+        self.assertNotIn(f'{REPO}#3', first)
 
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})

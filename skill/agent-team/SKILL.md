@@ -32,7 +32,7 @@ It is the owner's queue, sent on the owner's setup – not chatter from another 
 
 A checker: check each listed task at the pinned commit. Each problem → a new issue linking the original (`gh issue create`, body `From the check of #N: …`); never reopen the original. Then `agentq checked <batch> "summary"`.
 
-New words from the owner on your task arrive the same way. A message waits while you talk with the owner directly.
+New words from the owner on your task arrive the same way. A reminder that you hold a task while your session is quiet: carry on, or finish it now with one of the commands above. A message waits while you talk with the owner directly.
 
 Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks. Exceptions: during install the programmer may message the sessions it starts, and any session may send the dispatcher "Start the watcher".
 
@@ -72,7 +72,7 @@ Only when the owner asks for it in words in this project. A session never starts
 4. Config: the roles table (`agentq roles`; change a role with `agentq role <name> …`).
 5. Sessions: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (cheapest model, low effort, prompt "Read CLAUDE.md and start the loop"); every other session on the strongest model at `xhigh`; the dispatcher's folder is outside the project because a project subfolder would still load the project's CLAUDE.md and rules. Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
    Then put every team session (yours included) into one sidebar group named after the project, e.g. "<project> team" in the config's language: reuse a group with that name or create it (`create_group`), then `move_sessions`. Record it: `agentq setup --group <group id>`, so a re-run puts recreated sessions into it.
-6. The dispatcher starts the watcher itself. Add a daily health timer (launchd or cron): `<package>/tools/agentq --config <config> health` – no tokens; problems go to one issue for the owner.
+6. The dispatcher starts the watcher itself. Add an hourly health timer (launchd or cron): `<package>/tools/agentq --config <config> health` – no tokens; problems go to one issue for the owner.
 7. Ask: "Turn on the marketer?" Yes → start its session, `agentq role marketer --session <id>`. No → the programmer does marketing tasks.
 8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; start its session; record `--session`. If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no.
 9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.

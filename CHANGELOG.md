@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.16 – 2026-10-17
+- Stalled roles: a role that holds a task while its session has been quiet for `idle_minutes` (20) gets one reminder (`agentq nudge`); quiet for `escalate_minutes` (30) more, the owner is told in the health issue with the question label. The watcher reads a session's last activity from the desktop app's transcript, without tokens; where it cannot, the dispatcher checks with get_session every `check_minutes` (60) via `agentq held`.
+- `health` comments only when the problems change; an hourly timer is fine.
+- A running watcher exits when agentq is updated, so the dispatcher restarts it on the new code.
+
 ## 0.2.15 – 2026-10-17
 - The first watch (no delivery record yet) forwards only owner words on an open issue that waits for the owner or is in progress and that no agent comment followed; everything else counts as delivered, so a pause or an upgrade loses no answer and floods nothing.
 - An owner's comment stays in the plan until a `brief` delivers it (up to `forward_hours`, 24): a plan the dispatcher missed, or a comment written while no watcher ran, is no longer lost; the plan wakes the dispatcher again every `repeat_minutes`.

@@ -10,6 +10,7 @@ import copy
 import datetime as dt
 import fcntl
 import fnmatch
+import glob
 import html
 import json
 import os
@@ -62,6 +63,10 @@ DEFAULT_TEXTS = {
     'health_watch': 'the watcher is not running (last poll: {since}) – the dispatcher sends no tasks. Re-run setup.',
     'health_stuck': 'the watcher has not polled since {since}.',
     'health_error': "the watcher's last poll failed: {error}",
+    'nudge': ("You hold {ref} ('{label}'), but your session has been idle since {last}. Continue it, or finish it "
+              "now with one command: agentq done / ask / route / wait."),
+    'stalled': ("{role} holds {ref}, but its session ({session}) has been idle since {last} and did not react to a "
+                "reminder at {at}. Open that session and tell it what to do, or say \"release {ref}\" to any team session."),
     'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
     'health_stale': "{ref} is '{label}' but nothing happened for over {hours} h.",
     'rule_title': 'Rule question: {topic}',
@@ -223,6 +228,13 @@ def load_config(path):
     cfg['lesson_examples'] = cfg.get('lesson_examples', 5)
     cfg['repeat_minutes'] = cfg.get('repeat_minutes', 30)
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
+    cfg['check_minutes'] = cfg.get('check_minutes', 60)
+    cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
+    cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)
+    cfg['app_sessions'] = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or cfg.get('app_sessions') or
+                                             '~/Library/Application Support/Claude/claude-code-sessions')
+    cfg['transcripts'] = os.path.expanduser(os.environ.get('AGENTQ_TRANSCRIPTS') or cfg.get('transcripts') or
+                                            '~/.claude/projects')
     cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
@@ -620,6 +632,62 @@ def real_board(cfg, state, repo):
     return issues
 
 
+def session_activity(cfg, session):
+    """When a desktop-app session last did anything: its transcript file's time. None when this cannot be seen."""
+    if not session:
+        return None
+    metas = glob.glob(os.path.join(glob.escape(cfg['app_sessions']), '*', '*', f'{glob.escape(session)}.json'))
+    try:
+        with open(max(metas, key=os.path.getmtime), encoding='utf-8') as f:
+            cli = json.load(f).get('cliSessionId')
+    except (ValueError, OSError):
+        return None
+    files = glob.glob(os.path.join(glob.escape(cfg['transcripts']), '*', f'{glob.escape(cli or "-")}.jsonl'))
+    if not files:
+        return None
+    return dt.datetime.fromtimestamp(max(os.path.getmtime(f) for f in files), dt.timezone.utc).replace(microsecond=0)
+
+
+def check_held(cfg, state, repo, issues, start, plan):
+    """A role that holds a task but whose session went quiet gets one reminder; if it stays quiet, the owner is told.
+    Seen without tokens from the session's transcript; where that cannot be seen, the dispatcher checks (get_session)."""
+    nudges = state.setdefault('nudges', {})
+    checks = state.setdefault('held_checked', {})
+    idle = dt.timedelta(minutes=cfg['idle_minutes'])
+    held = set()
+    for role in cfg['roles']:
+        for issue in busy_with(cfg, issues, role):
+            ref = f"{repo}#{issue['number']}"
+            held.add(ref)
+            if not role['session']:
+                continue
+            last = session_activity(cfg, role['session'])
+            if last is None:
+                every = dt.timedelta(minutes=cfg['check_minutes'])
+                if cfg['check_minutes'] and start - parse_time(issue['updatedAt']) >= idle and (
+                        ref not in checks or start - parse_time(checks[ref]) >= every):
+                    plan.append(('held', ref, role, issue['title'], None))
+                    checks[ref] = iso(start)
+                continue
+            nudge = nudges.get(ref)
+            if nudge and last > parse_time(nudge['at']):
+                nudges.pop(ref)  # it reacted
+                nudge = None
+            if start - last < idle:
+                continue
+            if nudge is None:
+                nudges[ref] = {'at': iso(start)}
+                plan.append(('nudge', ref, role, issue['title'], iso(last)))
+            elif not nudge.get('told') and start - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']):
+                problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=role['session'],
+                                                          last=iso(last), at=nudge['at'])
+                report_health(cfg, state, [problem], needs_owner=True, close=False)
+                nudge['told'] = iso(start)
+    for table in (nudges, checks):
+        for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
+            del table[ref]
+
+
 def build_plan(cfg, state, start):
     """Read the board; return the steps for the dispatcher. An owner's comment stays in the plan until a brief
     delivers it (up to forward_hours), so a missed plan or a stopped watcher loses nothing."""
@@ -640,6 +708,8 @@ def build_plan(cfg, state, start):
                                if login_of(c) == cfg['agent_account']] or [''])
             # first run: only words on an open issue that waits for the owner or is in progress, with no agent
             # comment after them, may not have reached a role; everything else counts as delivered
+            if labels['health'] in labels_of(item):
+                continue  # the owner's report, not a task
             open_wait = item.get('state', 'OPEN') == 'OPEN' and (waiting_word | {labels['working']}) & set(labels_of(item))
             for c in item.get('comments', []):
                 if login_of(c) not in owners or not window <= parse_time(c['createdAt']) <= start:
@@ -665,6 +735,7 @@ def build_plan(cfg, state, start):
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 plan.append(('forward', ref, role or default_role(cfg), item['title'], min(times)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
+        check_held(cfg, state, repo, issues, start, plan)
         cache = {}
         for role in cfg['roles']:
             if role['role'] in taken or busy_with(cfg, issues, role):
@@ -694,6 +765,12 @@ def render_plan(cfg, plan, start):
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
             lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
+        elif kind == 'nudge':
+            lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send the output of '
+                         f'`{q} nudge {ref} --last {since}` to {session_of(role)}.')
+        elif kind == 'held':
+            lines.append(f'{n}. {role["role"]} holds {ref}: call get_session for {role["session"]}, then run '
+                         f'`{q} held {ref} --running <its isRunning> --last <its lastActivityAt>` and do what it prints.')
         elif kind == 'batch':
             lines.append(f'{n}. a batch is ready for {role["role"]}: run `{q} batch {role["role"]} -R {ref}` '
                          f'and do what it prints.')
@@ -722,7 +799,11 @@ def cmd_watch(cfg, opts):
         print('agentq watch: already running – nothing to do.')
         return 0
     interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
+    code = os.path.getmtime(os.path.realpath(__file__))
     while True:
+        if os.path.getmtime(os.path.realpath(__file__)) != code:
+            print('agentq watch: agentq was updated – start the watcher again.')
+            return 0
         state = load_state(cfg)
         start = now()
         work = copy.deepcopy(state)
@@ -1215,22 +1296,85 @@ def cmd_health(cfg, opts):
             if cfg['labels']['working'] in labels_of(issue) and moment - parse_time(issue['updatedAt']) > stale:
                 problems.append(texts['health_stale'].format(ref=f"{repo}#{issue['number']}",
                                                              label=cfg['labels']['working'], hours=cfg['stale_hours']))
+    report_health(cfg, state, problems)
+    save_state(cfg, state)
+
+
+def report_health(cfg, state, problems, needs_owner=False, close=True):
+    """One health issue for the owner: created, commented when the problems change, closed when all is well."""
+    texts = cfg['texts']
     repo = cfg['repos'][0]
     label = cfg['labels']['health']
     found = gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '5', '--json', 'number')
     report = '\n'.join(f'- {p}' for p in problems)
+    extra = [cfg['labels']['question']] if needs_owner else []
     if problems and found:
-        comment(cfg, repo, found[0]['number'], '\n' + report, 'health')
-        print(f"problems reported on {repo}#{found[0]['number']}:\n{report}")
+        number = found[0]['number']
+        if report == state.get('health_report') and not needs_owner:
+            print(f'problems unchanged since the last report on {repo}#{number}:\n{report}')
+            return number
+        comment(cfg, repo, number, '\n' + report, 'health')
+        relabel(repo, number, add=extra)
+        print(f"problems reported on {repo}#{number}:\n{report}")
     elif problems:
-        number = create_issue(repo, texts['health_title'], f'🤖 health:\n{report}', [label])
+        number = create_issue(repo, texts['health_title'], f'🤖 health:\n{report}', [label] + extra)
         print(f'problems reported in {repo}#{number}:\n{report}')
-    elif found:
-        comment(cfg, repo, found[0]['number'], texts['health_ok'], 'health')
-        gh('issue', 'close', str(found[0]['number']), '-R', repo)
-        print(f"healthy; {repo}#{found[0]['number']} closed")
+    elif found and close:
+        number = found[0]['number']
+        comment(cfg, repo, number, texts['health_ok'], 'health')
+        gh('issue', 'close', str(number), '-R', repo)
+        print(f"healthy; {repo}#{number} closed")
     else:
+        number = None
         print('healthy')
+    state['health_report'] = report if problems else ''
+    return number
+
+
+def cmd_held(cfg, opts):
+    """A role holds a task: is its session working on it? Remind it once when idle; tell the owner when that did not help."""
+    repo, number = resolve(cfg, opts.issue)
+    ref = f'{repo}#{number}'
+    state = load_state(cfg)
+    nudges = state.setdefault('nudges', {})
+    moment = now()
+    issue = view(repo, number)
+    role = role_of_labels(cfg, labels_of(issue)) or default_role(cfg)
+    if issue.get('state', 'OPEN') != 'OPEN' or cfg['labels']['working'] not in labels_of(issue):
+        nudges.pop(ref, None)
+        save_state(cfg, state)
+        print(f'{ref} is not held any more – nothing to do.')
+        return
+    last = parse_time(opts.last)
+    running = opts.running.strip().lower() in ('true', 'yes', '1', 'running')
+    nudge = nudges.get(ref)
+    if nudge and last > parse_time(nudge['at']):
+        nudges.pop(ref)  # it reacted to the reminder
+        nudge = None
+    if running or moment - last < dt.timedelta(minutes=cfg['idle_minutes']):
+        save_state(cfg, state)
+        print(f"{role['role']} is working on {ref} – nothing to do.")
+        return
+    if nudge is None:
+        nudges[ref] = {'at': iso(moment)}
+        save_state(cfg, state)
+        print(f"{role['role']} holds {ref} but has been idle since {iso(last)}. Now:")
+        print(f'1. send the output of `agentq nudge {ref} --last {iso(last)}` to {session_of(role)}')
+        return
+    if moment - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']) and not nudge.get('told'):
+        problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=role['session'] or '-',
+                                                  last=iso(last), at=nudge['at'])
+        where = report_health(cfg, state, [problem], needs_owner=True, close=False)
+        nudge['told'] = iso(moment)
+        save_state(cfg, state)
+        print(f'told the owner in {repo}#{where} – nothing to send.')
+        return
+    print(f"reminded {role['role']} at {nudge['at']}; waiting – nothing to do.")
+
+
+def cmd_nudge(cfg, opts):
+    repo, number = resolve(cfg, opts.issue)
+    print(cfg['texts']['nudge'].format(ref=f'{repo}#{number}', label=cfg['labels']['working'], last=opts.last or 'a while'))
 
 
 # ---------- setup ----------
@@ -1543,6 +1687,13 @@ def main(argv=None):
     ck.add_argument('issue')
     ck.add_argument('text', nargs='?')
     sub.add_parser('health', help='watcher alive, no stale work; problems go to one health issue')
+    hd = sub.add_parser('held', help="the dispatcher's check of a role's session that holds a task")
+    hd.add_argument('issue')
+    hd.add_argument('--running', required=True, help="the session's isRunning (get_session)")
+    hd.add_argument('--last', required=True, help="the session's lastActivityAt (get_session)")
+    ng = sub.add_parser('nudge', help='the reminder for an idle session that holds a task')
+    ng.add_argument('issue')
+    ng.add_argument('--last')
     su = sub.add_parser('setup', help='check access, write default roles, create labels and the dispatcher folder')
     su.add_argument('--checkout', help='the project folder (for path filters and pinned commits)')
     su.add_argument('--dispatcher-dir', help='the dispatcher folder (default ~/agent-team/<owner>-<repo>-dispatcher)')
@@ -1580,7 +1731,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
-                'link': cmd_link, 'pause': cmd_pause, 'resume': cmd_resume}
+                'link': cmd_link, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

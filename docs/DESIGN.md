@@ -46,7 +46,8 @@ When a new role overlaps an existing one (e.g. designer and marketer both claim 
    - needs another project → `agentq wait N other/repo#M`.
    A checker closes its batch with `agentq checked <batch>`, which labels every listed issue `checked: <role>`.
 4. **Teaching.** `agentq teach "banners → designer"` – anyone may teach. The owner's rules outrank agents' rules; a rule that contradicts an existing one is not written but becomes a question to the owner. `route` keeps the last ~5 examples per role, so the dispatcher's notes stay short.
-5. **Health** (`agentq health`, daily timer, no tokens): is the watcher alive, is any task "working" with no activity for over 24 h. Problems go to the owner on GitHub (one health issue, so the owner's phone gets notified).
+5. **Stalled roles.** A role that holds a task while its session has been quiet for 20 minutes gets one reminder; if it stays quiet for 30 more, the owner is told in the health issue ("needs you"). The watcher sees a session's last activity without tokens (the desktop app's transcript file); where it cannot, the dispatcher checks with get_session once an hour.
+6. **Health** (`agentq health`, hourly timer, no tokens): is the watcher alive, is any task "working" with no activity for over 24 h. Problems go to the owner on GitHub (one health issue, so the owner's phone gets notified).
 
 Busy is read from the board, so a role never gets a second task while it works on one. A direct chat between the owner and a session is not on the board; a task message then waits until the session answers the owner.
 

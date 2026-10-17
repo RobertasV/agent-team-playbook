@@ -1,4 +1,5 @@
 """agentq against a fake `gh`: python3 -m unittest discover -s tests"""
+import datetime
 import json
 import os
 import subprocess
@@ -59,7 +60,8 @@ class Base(unittest.TestCase):
     def env(self, now='2026-01-02T12:00:00Z'):
         return {**os.environ, 'PATH': os.path.join(self.dir.name, 'bin') + os.pathsep + os.environ['PATH'],
                 'FAKE_GH_LOG': self.log, 'FAKE_GH_FIXTURE': self.fixture, 'AGENTQ_NOW': now,
-                'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': ''}
+                'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': '',
+                'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx')}
 
     def body(self, call):
         return call[call.index('--body') + 1]
@@ -203,7 +205,8 @@ class TeamTest(Base):
         super().setUp()
         with open(self.config) as f:
             cfg = json.load(f)
-        cfg.update({'roles': ROLES, 'dispatcher': {'folder': os.path.join(self.dir.name, 'disp'), 'session': 'local_x'}})
+        cfg.update({'roles': ROLES, 'dispatcher': {'folder': os.path.join(self.dir.name, 'disp'), 'session': 'local_x'},
+                    'check_minutes': 0})
         with open(self.config, 'w') as f:
             json.dump(cfg, f)
 
@@ -262,6 +265,57 @@ class TeamTest(Base):
         first = self.run_tool('watch', '--once').stdout
         self.assertIn(f'the owner answered on {REPO}#6', first)
         self.assertNotIn(f'{REPO}#3', first)
+
+    def session(self, local_id, quiet_since):
+        """A desktop-app session whose transcript was last written at quiet_since."""
+        meta = os.path.join(self.dir.name, 'app', 'acct', 'org')
+        os.makedirs(meta, exist_ok=True)
+        with open(os.path.join(meta, f'{local_id}.json'), 'w') as f:
+            json.dump({'sessionId': local_id, 'cliSessionId': f'cli-{local_id}'}, f)
+        tx = os.path.join(self.dir.name, 'tx', '-proj')
+        os.makedirs(tx, exist_ok=True)
+        path = os.path.join(tx, f'cli-{local_id}.jsonl')
+        open(path, 'a').close()
+        moment = datetime.datetime.fromisoformat(quiet_since.replace('Z', '+00:00')).timestamp()
+        os.utime(path, (moment, moment))
+
+    def test_a_quiet_session_holding_a_task_is_reminded_once_then_the_owner_is_told(self):
+        self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z')], 'next': 70}})
+        self.session('local_p', '2026-01-02T11:50:00Z')
+        self.assertIn('no work', self.run_tool('watch', '--once', now=T0).stdout)  # quiet 10 min: fine
+        out = self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout
+        self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z: send the output of '
+                      f'`agentq nudge {REPO}#7 --last 2026-01-02T11:50:00Z` to programmer (local_p)', out)
+        self.assertIn("You hold acme/app#7 ('doing')", self.run_tool('nudge', '7', '--last', '2026-01-02T11:50:00Z').stdout)
+        self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T12:30:00Z').stdout)  # one reminder
+        self.assertEqual(self.calls(['issue', 'create']), [])
+        self.run_tool('watch', '--once', now='2026-01-02T12:46:00Z')
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertIn('ask owner', made)
+        self.assertIn(f'programmer holds {REPO}#7, but its session (local_p) has been idle since 2026-01-02T11:50:00Z', self.body(made))
+        self.run_tool('watch', '--once', now='2026-01-02T13:30:00Z')
+        self.assertEqual(len(self.calls(['issue', 'create'])), 1)  # told once
+        self.session('local_p', '2026-01-02T13:31:00Z')  # it woke up
+        self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T13:40:00Z').stdout)
+
+    def test_where_sessions_cannot_be_seen_the_dispatcher_checks_them(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['check_minutes'] = 60
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z')], 'next': 70}})
+        out = self.run_tool('watch', '--once', now=T0).stdout
+        self.assertIn(f'programmer holds {REPO}#7: call get_session for local_p, then run `agentq held {REPO}#7 '
+                      f'--running <its isRunning> --last <its lastActivityAt>`', out)
+        self.assertIn('nothing to do', self.run_tool('held', '7', '--running', 'true', '--last', '2026-01-02T09:00:00Z').stdout)
+        out = self.run_tool('held', '7', '--running', 'false', '--last', '2026-01-02T11:00:00Z').stdout
+        self.assertIn(f'send the output of `agentq nudge {REPO}#7 --last 2026-01-02T11:00:00Z` to programmer (local_p)', out)
+        self.assertIn('waiting – nothing to do', self.run_tool('held', '7', '--running', 'false', '--last',
+                                                              '2026-01-02T11:00:00Z', now='2026-01-02T12:10:00Z').stdout)
+        self.assertIn('told the owner', self.run_tool('held', '7', '--running', 'false', '--last', '2026-01-02T11:00:00Z',
+                                                      now='2026-01-02T12:40:00Z').stdout)
+        self.assertIn('ask owner', self.calls(['issue', 'create'])[-1])
 
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
@@ -484,6 +538,10 @@ class TeamTest(Base):
         self.assertIn('agent health', self.calls(['issue', 'create'])[-1])
         report = issue(60, 'Agent team health', ['agent health'])
         self.data({REPO: {'open': [stale, report]}})
+        self.assertIn('unchanged', self.run_tool('health').stdout)
+        self.assertEqual(self.calls(['issue', 'comment']), [])
+        other = issue(8, 'Stuck too', ['design', 'doing'], updated='2026-01-01T00:00:00Z')
+        self.data({REPO: {'open': [stale, other, report]}})
         self.run_tool('health')
         self.assertEqual(self.calls(['issue', 'comment'])[-1][2], '60')
         self.data({REPO: {'open': [report]}})

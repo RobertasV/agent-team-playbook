@@ -58,6 +58,9 @@
   "lesson_examples": 5,
   "repeat_minutes": 30,
   "forward_hours": 24,
+  "idle_minutes": 20,
+  "escalate_minutes": 30,
+  "check_minutes": 60,
   "accept_issues_from_others": false,
   "texts": {
     "take": "taking this.",

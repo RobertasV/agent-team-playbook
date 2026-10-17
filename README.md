@@ -12,7 +12,7 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 - **It learns where tasks belong.** When a session gets a task that isn't its own, routing it on teaches the dispatcher. Your rules always outrank the agents' rules.
 - **Your words are never lost or reworded.** The dispatcher passes them on verbatim, with screenshots downloaded, even from private repositories.
 - **Everything is visible.** Every session is a normal session you can open. Every agent comment on GitHub comes from a separate AI account and starts with `🤖 <role>:`.
-- **Problems reach your phone.** A daily health check opens one GitHub issue when the watcher stopped or a task got stuck.
+- **Problems reach your phone.** An hourly health check (no tokens) opens one GitHub issue when the watcher stopped or a task got stuck. A role that holds a task but went quiet gets one reminder; if that does not help, the health issue asks for you.
 - **Projects can share tasks.** A task filed in the wrong project moves to the right one. A task that spans two projects is split, and each part links back to the other.
 - **Per project, in your language.** The team is installed per project, never globally. All label names and texts come from the config.
 
@@ -77,7 +77,8 @@ The commands agents use:
 | `move N other/repo` · `split N other/repo "title" "text"` | dispatcher, role | sharing between linked projects |
 | `batch role` · `checked N` | dispatcher · checker | create a checker's batch · finish it (labels every task `checked: <role>`) |
 | `teach "topic → role" [--owner]` | anyone | a rule for the dispatcher |
-| `health` | daily timer | watcher alive, nothing stuck; problems go to one issue |
+| `health` | hourly timer | watcher alive, nothing stuck; problems go to one issue |
+| `nudge` · `held` | watcher, dispatcher | a reminder for a quiet session that holds a task |
 | `init` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder |
 | `queue` · `take` · `defer` · `check` | anyone | the 0.1 commands, still available |
 
@@ -89,7 +90,7 @@ See [config.example.json](config.example.json). The main parts:
 - `roles`: a table of role, label, mode, `n`/`hours`/`paths` (checker mode), model, `release_model`, effort, `hard_effort`, merge, session, description, examples;
 - `dispatcher`: folder, session, model, effort;
 - `links`: linked projects and what belongs there (sharing is on while a link exists);
-- `poll_seconds` (60), `repeat_minutes` (30: a plan the dispatcher did not act on wakes it again at most this often), `forward_hours` (24: how long an undelivered owner comment stays in the plan), `stale_hours` (24);
+- `poll_seconds` (60), `repeat_minutes` (30: a plan the dispatcher did not act on wakes it again at most this often), `forward_hours` (24: how long an undelivered owner comment stays in the plan), `idle_minutes` (20) and `escalate_minutes` (30) for quiet sessions, `stale_hours` (24);
 - `labels` and `texts`: every label name and every text the tool writes, so you can use your own language.
 
 The dispatcher reads `roles.md` in its folder. agentq writes that file from the roles table, the rules and the last 5 routing lessons per role.

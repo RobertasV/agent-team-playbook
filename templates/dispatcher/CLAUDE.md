@@ -13,6 +13,7 @@ agentq is `{{agentq}}`. Run it from this folder; it finds the project's config h
 2. When it ends, read its output. It is a plan; do each numbered step in order. When a command prints more numbered steps, do those too:
    - "send the output of `X` to <role> (<id>)": run X and send its whole output verbatim with SendMessage, `to` = that id (the role's session, not yours). Add nothing.
    - "set_session_model for <role> (<id>): M" or "set_session_effort for <role> (<id>): E": call that tool with session id <id>.
+   - "call get_session for <id>": that session tool (load it with ToolSearch if it is not loaded); pass its isRunning and lastActivityAt to the command the step names.
    - "classify": read `roles.md` here and pick the role whose description, examples, rules and recent lessons fit. If the title says too little, run `{{agentq}} brief N` and look at the screenshots it lists. Unsure → {{default_role}}.
 3. Start the watcher again (step 1). Always, after every plan.
 

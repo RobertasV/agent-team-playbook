@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 – 2026-10-17
+- Plans and `assign`/`batch` name each session with its role: "send … to programmer (local_…)", "set_session_effort for programmer (local_…): max".
+- The dispatcher's CLAUDE.md states its own session id and that every id in a plan is a role session, never its own. `setup` and `agentq role dispatcher --session` write it, also into a CLAUDE.md made by 0.2.0/0.2.1.
+
 ## 0.2.1 – 2026-10-17
 - `assign --queue` (sorting at setup) adds the role label only and drops another role's label; it never removes a skip label such as the question for the owner.
 - `role --hours 24` stores a whole number; the roles table shows `5/24h`.

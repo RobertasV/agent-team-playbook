@@ -231,7 +231,7 @@ class TeamTest(Base):
         self.data(fixture)
         second = self.run_tool('watch', '--once', now=T1).stdout
         self.assertIn(f'the owner wrote on {REPO}#3 (designer): send the output of '
-                      f'`agentq brief {REPO}#3 --since 2026-01-02T12:00:30Z` to session local_d', second)
+                      f'`agentq brief {REPO}#3 --since 2026-01-02T12:00:30Z` to designer (local_d)', second)
         self.assertIn(f'the owner answered on {REPO}#6: run `agentq assign {REPO}#6 programmer`', second)
         self.assertNotIn(f'assign {REPO}#2', second)
         third = self.run_tool('watch', '--once', now=T2).stdout
@@ -266,12 +266,12 @@ class TeamTest(Base):
                          ['issue', 'edit', '4', '-R', REPO, '--add-label', 'design', '--remove-label', 'ask owner'])
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 dispatcher: queued for designer.')
         out = self.run_tool('assign', '8', 'programmer').stdout
-        self.assertIn('1. set_session_effort local_p max', out)
-        self.assertIn(f'2. send the output of `agentq brief {REPO}#8` to session local_p', out)
+        self.assertIn('1. set_session_effort for programmer (local_p): max', out)
+        self.assertIn(f'2. send the output of `agentq brief {REPO}#8` to programmer (local_p)', out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'prog',
                                                              '--add-label', 'doing'])
         self.data({REPO: {'open': [issue(9, 'Easy one')]}})
-        self.assertIn('1. set_session_effort local_p high', self.run_tool('assign', '9', 'programmer').stdout)
+        self.assertIn('1. set_session_effort for programmer (local_p): high', self.run_tool('assign', '9', 'programmer').stdout)
         self.assertNotIn('set_session', self.run_tool('assign', '9', 'programmer').stdout)
         comments = len(self.calls(['issue', 'comment']))
         self.data({REPO: {'open': [issue(4, 'Icon', ['ask owner', 'prog'])]}})
@@ -373,7 +373,7 @@ class TeamTest(Base):
         self.assertIn(f'Commit: {head}', self.body(made))
         self.assertNotIn('#11', self.body(made))
         out = self.run_tool('batch', 'checker').stdout
-        self.assertIn('1. set_session_model local_c mid', out)
+        self.assertIn('1. set_session_model for checker (local_c): mid', out)
         body = self.body(self.calls(['issue', 'create'])[-1])
         self.assertIn('- #10 Done A\n- #11 Done B', body)
         self.data({REPO: {'open': [issue(50, 'Check: #10 #11', ['check', 'check batch', 'doing'], body=body)]}})
@@ -429,6 +429,16 @@ class TeamTest(Base):
         claude = open(os.path.join(disp, 'CLAUDE.md')).read()
         self.assertIn(f'`{os.path.realpath(TOOL)} watch`', claude)
         self.assertNotIn('{{', claude)
+        self.assertIn('Your own session id is `local_x`. Never send to it. Every session id in a plan', claude)
+        old = claude.replace(claude[claude.index('<!-- agentq:session'):claude.index('You are')], '')
+        with open(os.path.join(disp, 'CLAUDE.md'), 'w') as f:
+            f.write(old)
+        self.run_tool('role', 'dispatcher', '--session', 'local_y')
+        claude = open(os.path.join(disp, 'CLAUDE.md')).read()
+        self.assertEqual(claude.count('<!-- agentq:session -->'), 1)
+        self.assertIn('Your own session id is `local_y`.', claude)
+        self.assertTrue(claude.startswith('# Dispatcher\n\n<!-- agentq:session -->'))
+        self.assertIn('\n\nYou are the dispatcher', claude)
         self.assertTrue(os.path.exists(os.path.join(disp, 'examples', 'README.md')))
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())

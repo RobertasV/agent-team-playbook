@@ -277,7 +277,8 @@ def checked_label(cfg, role):
 
 
 def session_of(role):
-    return role['session'] or f'<{role["role"]} session: not in the config – run setup>'
+    """A role session as plans name it: the role, then its id – never the dispatcher's own."""
+    return f"{role['role']} ({role['session'] or 'no session id in the config – run setup'})"
 
 
 # ---------- GitHub helpers ----------
@@ -614,7 +615,7 @@ def render_plan(cfg, plan, start):
     for n, (kind, ref, role, title, since) in enumerate(plan, 1):
         if kind == 'forward':
             lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send the output of '
-                         f'`{q} brief {ref} --since {since}` to session {session_of(role)}.')
+                         f'`{q} brief {ref} --since {since}` to {session_of(role)}.')
         elif kind == 'answered':
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
@@ -690,14 +691,14 @@ def session_settings(cfg, state, role, issue_labels, batch):
     lines = []
     for key, tool in (('model', 'set_session_model'), ('effort', 'set_session_effort')):
         if want[key] and want[key] != last.get(key):
-            lines.append(f'{tool} {session_of(role)} {want[key]}')
+            lines.append(f'{tool} for {session_of(role)}: {want[key]}')
             last[key] = want[key]
     return lines
 
 
 def print_send(cfg, state, role, ref, issue_labels, batch=False):
     steps = session_settings(cfg, state, role, issue_labels, batch)
-    steps.append(f'send the output of `agentq brief {ref}` to session {session_of(role)}')
+    steps.append(f'send the output of `agentq brief {ref}` to {session_of(role)}')
     for n, step in enumerate(steps, 1):
         print(f'{n}. {step}')
 
@@ -1191,6 +1192,32 @@ def cmd_init(opts):
     print(f'installed in {top} only. Next: agentq setup (from the project folder).')
 
 
+SESSION_BLOCK = re.compile(r'<!-- agentq:session -->.*?<!-- /agentq:session -->\n?', re.S)
+
+
+def sync_dispatcher_session(cfg):
+    """Write the dispatcher's own session id into its CLAUDE.md, so it never mistakes a role's id in a plan for its own."""
+    path = os.path.join(cfg['team_dir'], 'CLAUDE.md')
+    if not cfg['dispatcher']['folder'] or not os.path.exists(path):
+        return
+    own = cfg['dispatcher']['session']
+    line = (f'Your own session id is `{own}`. Never send to it.' if own else
+            'Your own session id is not recorded yet (`agentq role dispatcher --session <id>`).')
+    block = (f'<!-- agentq:session -->\n{line} Every session id in a plan or in agentq\'s output belongs to a role '
+             f'session, never to you: send to that session.\n<!-- /agentq:session -->\n')
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    if SESSION_BLOCK.search(text):
+        new = SESSION_BLOCK.sub(lambda m: block, text, count=1)
+    else:
+        head, _, rest = text.partition('\n\n')
+        new = f'{head}\n\n{block}\n{rest}'
+    if new != text:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new)
+        print(f'dispatcher: {path} – own session id {own or "not recorded yet"}')
+
+
 def cmd_setup(cfg, opts):
     problems = []
     who = gh_json('api', 'user')
@@ -1224,6 +1251,7 @@ def cmd_setup(cfg, opts):
     cfg = save_config(cfg, fill)
     ensure_labels(cfg)
     install_dispatcher(cfg, cfg['dispatcher']['folder'])
+    sync_dispatcher_session(cfg)
     write_roles(cfg)
     print_roles_table(cfg)
     return 0
@@ -1286,6 +1314,7 @@ def cmd_role(cfg, opts):
         raise Fail('the default role is gone')
     if not opts.remove:
         ensure_labels(cfg)
+    sync_dispatcher_session(cfg)
     write_roles(cfg)
     print_roles_table(cfg)
 

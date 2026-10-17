@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.15 – 2026-10-17
+- An owner's comment stays in the plan until a `brief` delivers it (up to `forward_hours`, 24): a plan the dispatcher missed, or a comment written while no watcher ran, is no longer lost; the plan wakes the dispatcher again every `repeat_minutes`.
+- A working label set by someone other than the agent account (e.g. the owner's own tools) no longer makes a role busy.
+- The owner's answer on an issue waiting for the owner's word (the question or the owner-word label, also when both are one label) puts it back to its role; `assign` removes both labels.
+
 ## 0.2.14 – 2026-10-17
 - Stop and go in one word: the owner says "stop" or "go" to any team session; it runs `pause` / `resume` and, if needed, tells the dispatcher "Start the watcher" itself.
 

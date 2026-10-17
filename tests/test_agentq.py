@@ -241,9 +241,35 @@ class TeamTest(Base):
                       f'`agentq brief {REPO}#3 --since 2026-01-02T12:00:30Z` to designer (local_d)', second)
         self.assertIn(f'the owner answered on {REPO}#6: run `agentq assign {REPO}#6 programmer`', second)
         self.assertNotIn(f'assign {REPO}#2', second)
-        third = self.run_tool('watch', '--once', now=T2).stdout
-        self.assertNotIn('the owner wrote', third)
-        self.assertNotIn('the owner answered', third)
+        self.assertIn('no work', self.run_tool('watch', '--once', now=T2).stdout)
+        fixture['api'] = {f'repos/{REPO}/issues/3': {'title': 'Banner', 'body': '', 'labels': [{'name': 'design'}],
+                                                    'user': {'login': 'boss'}},
+                          f'repos/{REPO}/issues/3/comments': [
+                              {'user': {'login': 'boss'}, 'body': 'make it red', 'created_at': '2026-01-02T12:00:30Z'}]}
+        self.data(fixture)
+        self.assertIn('make it red', self.run_tool('brief', '3', '--since', '2026-01-02T12:00:30Z', now=T2).stdout)
+        later = self.run_tool('watch', '--once', now='2026-01-02T12:40:00Z').stdout
+        self.assertNotIn('the owner wrote', later)  # delivered by the brief
+        self.assertIn(f'the owner answered on {REPO}#6', later)  # not delivered yet: it stays in the plan
+
+    def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
+        self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
+        self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')
+        self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing']),
+                                   issue(6, 'Which colour?', ['prog', 'ask owner'],
+                                         comments=[said('boss', 'blue', '2026-01-02T09:00:00Z')])]}})
+        self.assertIn(f'the owner answered on {REPO}#6', self.run_tool('watch', '--once', now='2026-01-02T12:00:00Z').stdout)
+
+    def test_a_working_label_the_owner_set_does_not_make_a_role_busy(self):
+        self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(7, 'Icon', ['design'])]},
+                   'api': {f'repos/{REPO}/issues/3/events?per_page=100': [
+                       {'event': 'labeled', 'label': {'name': 'doing'}, 'actor': {'login': 'boss'}}]}})
+        self.assertIn(f'next task for designer: run `agentq assign {REPO}#3 designer`', self.run_tool('watch', '--once').stdout)
+        self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing'], updated='2026-01-02T11:00:00Z'),
+                                   issue(7, 'Icon', ['design'])]},
+                   'api': {f'repos/{REPO}/issues/3/events?per_page=100': [
+                       {'event': 'labeled', 'label': {'name': 'doing'}, 'actor': {'login': 'bot'}}]}})
+        self.assertNotIn('designer', self.run_tool('watch', '--once', now=T1).stdout)
 
     def test_watch_without_work_keeps_polling_and_a_second_watcher_steps_back(self):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(7, 'Busy', ['prog', 'doing'])]}})
@@ -256,9 +282,8 @@ class TeamTest(Base):
             self.assertIn('already running', self.run_tool('watch').stdout)
         self.data(self.board())
         self.assertIn('the owner wrote', self.run_tool('watch', '--once', now=T0).stdout)
-        self.assertIn('agentq plan', self.run_tool('watch', '--once', now=T1).stdout)
-        self.assertIn('no work', self.run_tool('watch', '--once', now=T2).stdout)
-        self.assertIn('agentq plan', self.run_tool('watch', '--once', now='2026-01-02T12:32:00Z').stdout)
+        self.assertIn('no work', self.run_tool('watch', '--once', now=T1).stdout)  # same plan, not acted on yet
+        self.assertIn('the owner wrote', self.run_tool('watch', '--once', now='2026-01-02T12:31:00Z').stdout)
         with open(self.config + '.state.json', 'w') as f:
             json.dump({}, f)
         run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--interval', '0'],

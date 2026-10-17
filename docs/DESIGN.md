@@ -30,8 +30,8 @@ When a new role overlaps an existing one (e.g. designer and marketer both claim 
 ## Flow
 
 1. **Watcher** (`agentq watch`, run in the background by the dispatcher) polls GitHub every minute and spends no tokens. It ignores the agent account's own comments, so agents' updates never wake anyone. It builds a plan:
-   - owner comments since the last mark → forward to the role holding that issue (default: programmer); on an issue waiting for the owner's answer → back to its role; on a queued issue → nothing (its brief carries them); on an unlabelled one → it is classified anyway;
-   - a role is **free** when no open issue carries both its role label and the working label; for each free programmer-mode role, the next issue: priority label → blocking label → oldest; unlabelled issues go to the dispatcher to classify;
+   - owner comments not yet delivered (a brief delivers them; the last 24 h are kept) → forward to the role holding that issue (default: programmer); a plan the dispatcher did not act on wakes it again every 30 minutes, so a missed plan or a stopped watcher loses nothing; on an issue waiting for the owner's answer → back to its role; on a queued issue → nothing (its brief carries them); on an unlabelled one → it is classified anyway;
+   - a role is **free** when no open issue carries both its role label and a working label the agent account set (one the owner's own tools set does not count); for each free programmer-mode role, the next issue: priority label → blocking label → oldest; unlabelled issues go to the dispatcher to classify;
    - checker-mode roles with a ready batch → a batch issue (`Check: #a #b #c`, pinned commit) labelled for that role.
    An empty plan means it keeps polling; otherwise it prints the plan and exits, which wakes the dispatcher.
 2. **Dispatcher** on wake:

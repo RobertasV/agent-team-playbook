@@ -89,7 +89,7 @@ See [config.example.json](config.example.json). The main parts:
 - `roles`: a table of role, label, mode, `n`/`hours`/`paths` (checker mode), model, `release_model`, effort, `hard_effort`, merge, session, description, examples;
 - `dispatcher`: folder, session, model, effort;
 - `links`: linked projects and what belongs there (sharing is on while a link exists);
-- `poll_seconds` (60), `repeat_minutes` (30: a plan the dispatcher did not act on wakes it again at most this often), `stale_hours` (24);
+- `poll_seconds` (60), `repeat_minutes` (30: a plan the dispatcher did not act on wakes it again at most this often), `forward_hours` (24: how long an undelivered owner comment stays in the plan), `stale_hours` (24);
 - `labels` and `texts`: every label name and every text the tool writes, so you can use your own language.
 
 The dispatcher reads `roles.md` in its folder. agentq writes that file from the roles table, the rules and the last 5 routing lessons per role.

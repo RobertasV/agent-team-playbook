@@ -35,7 +35,6 @@ REPO_FILE = re.compile(r'^https://(?:github\.com/([\w.-]+)/([\w.-]+)/(?:raw|blob
 IMG = re.compile(r'<img\b[^>]*?\bsrc="([^"]+)"', re.I)
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 MODES = ('programmer', 'checker')
-OVERLAP = dt.timedelta(minutes=10)
 DEFAULT_LABELS = {
     'priority': 'priority',
     'blocking': 'blocking',
@@ -223,6 +222,7 @@ def load_config(path):
     cfg['watch_grace_minutes'] = cfg.get('watch_grace_minutes', 30)
     cfg['lesson_examples'] = cfg.get('lesson_examples', 5)
     cfg['repeat_minutes'] = cfg.get('repeat_minutes', 30)
+    cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
@@ -558,43 +558,105 @@ def batch_ready(cfg, role, items, moment):
     return len(items) >= int(role['n']) or moment - parse_time(items[0]['closedAt']) >= dt.timedelta(hours=float(role['hours']))
 
 
+def comment_key(c):
+    """The same key for a comment from `gh issue list` (GraphQL) and from `gh api` (REST)."""
+    return f"{login_of(c)}@{c.get('createdAt') or c.get('created_at')}"
+
+
+def delivered_path(cfg):
+    return cfg['state_file'] + '.delivered.json'
+
+
+def load_delivered(cfg):
+    try:
+        with open(delivered_path(cfg), encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+
+
+def mark_delivered(cfg, repo, comments, keep_hours):
+    """The owner's comments that reached a role (brief printed them). Only brief and the first watch write this."""
+    data = load_delivered(cfg) or {}
+    marks = data.setdefault(repo, {})
+    for c in comments:
+        marks[comment_key(c)] = c.get('createdAt') or c.get('created_at')
+    oldest = now() - dt.timedelta(hours=2 * keep_hours)
+    data[repo] = {k: at for k, at in marks.items() if parse_time(at) >= oldest}
+    tmp = delivered_path(cfg) + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, delivered_path(cfg))
+
+
+def agent_set_working(cfg, state, repo, issue):
+    """Busy means the agent account set the working label; one the owner's own tools set does not count."""
+    key = f"{repo}#{issue['number']}"
+    cache = state.setdefault('working_by', {})
+    hit = cache.get(key)
+    if hit and hit['at'] == issue.get('updatedAt'):
+        return hit['agent']
+    events = gh_pages('api', f"repos/{repo}/issues/{issue['number']}/events?per_page=100", '--paginate')
+    setters = [e for e in events if e.get('event') == 'labeled'
+               and (e.get('label') or {}).get('name') == cfg['labels']['working']]
+    agent = not setters or (setters[-1].get('actor') or {}).get('login') == cfg['agent_account']
+    cache[key] = {'at': issue.get('updatedAt'), 'agent': agent}
+    return agent
+
+
+def real_board(cfg, state, repo):
+    """The open issues, with a working label the agent account did not set left out."""
+    issues = board(repo)
+    working = cfg['labels']['working']
+    held = set()
+    for issue in issues:
+        if working in labels_of(issue):
+            held.add(f"{repo}#{issue['number']}")
+            if not agent_set_working(cfg, state, repo, issue):
+                issue['labels'] = [l for l in issue['labels'] if l['name'] != working]
+    cache = state.get('working_by', {})
+    for key in [k for k in cache if k.startswith(repo + '#') and k not in held]:
+        del cache[key]
+    return issues
+
+
 def build_plan(cfg, state, start):
-    """Read the board; return the steps for the dispatcher. Moves the marks in `state`."""
+    """Read the board; return the steps for the dispatcher. An owner's comment stays in the plan until a brief
+    delivers it (up to forward_hours), so a missed plan or a stopped watcher loses nothing."""
     owners = set(cfg['owner_accounts'])
     labels = cfg['labels']
+    waiting_word = {labels['question'], labels['owner_word']}
+    window = start - dt.timedelta(hours=cfg['forward_hours'])
+    delivered = load_delivered(cfg)
     plan = []
     for repo in cfg['repos']:
-        mine = state.setdefault(repo, {})
-        first = 'watch_mark' not in mine
-        seen = mine.setdefault('seen', {})
-        issues = board(repo)
+        issues = real_board(cfg, state, repo)
         taken = set()
-        window = iso(start - OVERLAP)
-        news = {}
+        news, fresh = {}, []
         for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '100',
-                            '--search', f'updated:>={window}', '--json', 'number,title,labels,state,comments'):
+                            '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments'):
             for c in item.get('comments', []):
-                key = c.get('id') or c.get('url') or f"{login_of(c)}@{c['createdAt']}"
-                at = parse_time(c['createdAt'])
-                if login_of(c) not in owners or key in seen or not start - OVERLAP <= at <= start:
+                if login_of(c) not in owners or not window <= parse_time(c['createdAt']) <= start:
                     continue
-                seen[key] = c['createdAt']
-                if not first:
+                if delivered is None or repo not in delivered:
+                    fresh.append(c)
+                elif comment_key(c) not in delivered[repo]:
                     news.setdefault(item['number'], (item, []))[1].append(c['createdAt'])
-        for key in [k for k, at in seen.items() if parse_time(at) < start - 2 * OVERLAP]:
-            del seen[key]
-        mine['watch_mark'] = iso(start)
+        if delivered is None or repo not in delivered:  # first run: what is on the board now counts as delivered
+            mark_delivered(cfg, repo, fresh, cfg['forward_hours'])
+        held = {i['number']: i for i in issues}
         for number, (item, times) in sorted(news.items()):
+            if number in held:
+                item = {**item, 'labels': held[number]['labels']}  # without a working label the owner set
             names = labels_of(item)
             role = role_of_labels(cfg, names)
             ref = f'{repo}#{number}'
             is_open = item.get('state', 'OPEN') == 'OPEN'
-            if is_open and labels['question'] in names:
+            if is_open and waiting_word & set(names):
                 role = role or default_role(cfg)
                 plan.append(('answered', ref, role, item['title'], None))
                 taken.add(role['role'])
-            elif not is_open or (role and (labels['working'] in names or cfg['skip'] & set(names))) \
-                    or (not role and (labels['working'] in names or cfg['skip'] & set(names))):
+            elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 plan.append(('forward', ref, role or default_role(cfg), item['title'], min(times)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         cache = {}
@@ -730,8 +792,9 @@ def cmd_assign(cfg, opts):
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, in its queue")
         return
-    remove += [labels['question']] if labels['question'] in names else []  # the owner answered
-    busy = busy_with(cfg, board(repo), role, but=number)
+    remove += [n for n in {labels['question'], labels['owner_word']} if n in names]  # the owner answered
+    state = load_state(cfg)
+    busy = busy_with(cfg, real_board(cfg, state, repo), role, but=number)
     who = cfg['dispatcher']['name']
     if busy:
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
@@ -741,7 +804,6 @@ def cmd_assign(cfg, opts):
     comment(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who)
     relabel(repo, number, add=[role['label'], labels['working']], remove=remove)
     print(f"{ref} → {role['role']}, working. Now:")
-    state = load_state(cfg)
     print_send(cfg, state, role, ref, names, batch=labels['batch'] in names)
     save_state(cfg, state)
 
@@ -819,6 +881,7 @@ def cmd_brief(cfg, opts):
     if shots:
         out.append('--- screenshots, in order, as local files ---')
         out += shots
+    mark_delivered(cfg, repo, picked, cfg['forward_hours'])
     if not since:
         batch = BATCH_MARK.search(issue.get('body') or '')
         finish = 'finish_batch' if batch else 'finish' if role['merge'] else 'finish_handoff'
@@ -1073,10 +1136,10 @@ def cmd_batch(cfg, opts):
     repo = opts.repo or cfg['repos'][0]
     if repo not in cfg['repos']:
         raise Fail(f'{repo} is not in this config')
-    busy = busy_with(cfg, board(repo), role)
+    state = load_state(cfg)
+    busy = busy_with(cfg, real_board(cfg, state, repo), role)
     if busy:
         raise Fail(f"{role['role']} is busy with {repo}#{busy[0]['number']}")
-    state = load_state(cfg)
     items = unchecked(cfg, state, repo, role, {})[:20]
     if not items:
         print(f'nothing for {role["role"]} to check')

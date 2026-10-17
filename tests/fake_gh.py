@@ -47,7 +47,8 @@ elif args[0] == 'api' and '/contents/' in args[1]:
         sys.exit(1)
     sys.stdout.write(data['raw'][args[1]])
 elif args[0] == 'api':
-    print(json.dumps(data.get('api', {}).get(args[1], [] if args[1].endswith('/comments') else {})))
+    listing = args[1].split('?')[0].endswith(('/comments', '/events'))
+    print(json.dumps(data.get('api', {}).get(args[1], [] if listing else {})))
 else:
     print(f'fake gh: unexpected {args}', file=sys.stderr)
     sys.exit(2)

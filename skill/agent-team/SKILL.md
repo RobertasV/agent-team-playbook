@@ -49,7 +49,7 @@ A role can run outside the Claude desktop app (`agentq role <name> --agent codex
 3. back to 1.
 Such a project points AGENTS.md at this skill (`agentq init --codex`).
 
-The whole team can move: the owner says e.g. "the team goes to Codex" → `agentq team codex` and do what it prints (a Codex task in the dispatcher folder reads AGENTS.md there and loops on `agentq watch --max-minutes 9`; one Codex task per role worker loops on `agentq next`). The Claude dispatcher stops by itself at its next watch. Back: `agentq team claude`.
+The whole team can move: the owner says e.g. "the team goes to Codex" → `agentq team codex` and do what it prints (a Codex task in the dispatcher folder reads AGENTS.md there and loops on `agentq watch --max-minutes 9`; one Codex task per role worker loops on `agentq next`). The Claude dispatcher stops by itself at its next watch. Back: `agentq team claude`. Both at once (a Claude and a Codex dispatcher, each role on its own agent): `agentq team both`.
 
 ## The owner's words
 

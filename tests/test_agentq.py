@@ -519,6 +519,34 @@ class TeamTest(Base):
         self.assertIn('no work', codex.stdout)
         self.assertIn('send the Claude dispatcher', self.run_tool('team', 'claude').stdout)
 
+    def test_claude_and_codex_dispatchers_side_by_side(self):
+        self.data({REPO: {'open': []}})
+        self.assertIn('side by side', self.run_tool('team', 'both').stdout)
+        import fcntl
+        with open(self.config + '.state.json.watch.claude.lock', 'a') as lock:  # a Claude watcher runs
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            codex = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
+                                   text=True, env={**self.env(), 'CODEX_THREAD_ID': 't1'})
+            self.assertIn('no work', codex.stdout)
+            claude = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
+                                    text=True, env={**self.env(), 'CLAUDECODE': '1'})
+            self.assertIn('already running', claude.stdout)
+
+    def test_words_on_a_task_another_computer_holds_are_left_to_it(self):
+        self.data({REPO: {'open': []}})
+        self.run_tool('watch', '--once', now=T0)
+        held = [said('bot', '🤖 designer: → designer.\n<!-- agentq:claim pc2/dispatcher/x1 -->', '2026-01-02T11:00:00Z'),
+                said('boss', 'make it red', '2026-01-02T12:00:30Z')]
+        self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing'], comments=held)]}})
+        self.assertNotIn('the owner wrote', self.run_tool('watch', '--once', now=T1).stdout)
+
+    def test_a_stale_pr_task_already_on_the_board_is_not_opened_twice(self):
+        pr = {'number': 1, 'title': 'Accounts', 'updatedAt': '2025-12-20T10:00:00Z', 'url': 'https://x/pull/1', 'isDraft': False}
+        self.data({REPO: {'open': [issue(40, 'PR #1 untouched for 3 days: finish it or close it', ['prog', 'doing'])],
+                          'prs': [pr]}})
+        self.run_tool('watch', '--once')
+        self.assertEqual(self.calls(['issue', 'create']), [])
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')

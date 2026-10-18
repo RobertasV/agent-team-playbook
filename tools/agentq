@@ -773,7 +773,7 @@ def check_held(cfg, state, repo, issues, start, plan):
             del table[ref]
 
 
-def check_prs(cfg, state, repo, start):
+def check_prs(cfg, state, repo, start, issues=()):
     """Hourly: an open pull request untouched for stale_pr_days becomes a task for the default role (once per stall)."""
     if not cfg['stale_pr_days']:
         return
@@ -789,7 +789,11 @@ def check_prs(cfg, state, repo, start):
         if start - parse_time(pr['updatedAt']) < dt.timedelta(days=cfg['stale_pr_days']) or seen.get(key) == pr['updatedAt']:
             continue
         texts = cfg['texts']
-        create_issue(repo, texts['stale_pr_title'].format(number=pr['number'], days=cfg['stale_pr_days']),
+        title = texts['stale_pr_title'].format(number=pr['number'], days=cfg['stale_pr_days'])
+        if any(i['title'] == title for i in issues):  # another dispatcher already opened it
+            seen[key] = pr['updatedAt']
+            continue
+        create_issue(repo, title,
                      f"🤖 health: " + texts['stale_pr_body'].format(url=pr['url'], title=pr['title'], updated=pr['updatedAt']),
                      [role['label']])
         seen[key] = pr['updatedAt']
@@ -808,6 +812,8 @@ def check_tests(cfg, state, repo, start, plan):
     t = cfg['tests']
     if t['mode'] != 'batched' or not t['full'] or not t['checkout'] or repo != cfg['repos'][0]:
         return
+    if t.get('host') and t['host'] != socket.gethostname():
+        return  # with several dispatchers, the full suite runs on one computer
     ts = state.setdefault('tests', {})
     base = cfg['state_file'] + '.tests'
     run = ts.get('running')
@@ -931,10 +937,13 @@ def build_plan(cfg, state, start):
                 role = role or default_role(cfg)
                 if pulls(role):
                     continue  # it reads new words when it runs `agentq done`
+                claims = [m.group(1) for c in item.get('comments', []) for m in [CLAIM_MARK.search(c.get('body') or '')] if m]
+                if claims and claims[-1].split('/')[0] != socket.gethostname():
+                    continue  # another computer's dispatcher holds this task and forwards the words
                 plan.append(('forward', ref, role, item['title'], min(times), holder_of(state, role, ref)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
-        check_prs(cfg, state, repo, start)
+        check_prs(cfg, state, repo, start, issues)
         check_tests(cfg, state, repo, start, plan)
         cache = {}
         for role in cfg['roles']:
@@ -997,14 +1006,24 @@ def render_plan(cfg, plan, start, clear=False):
     return '\n'.join(lines)
 
 
-def watch_lock(cfg):
-    handle = open(cfg['state_file'] + '.watch.lock', 'a')
+def watch_lock(cfg, who=None):
+    """One watcher per project and agent; with dispatcher agent "both" a Claude and a Codex watcher may run side by side."""
+    handle = open(cfg['state_file'] + (f'.watch.{who}.lock' if who else '.watch.lock'), 'a')
     try:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         handle.close()
         return None
     return handle
+
+
+def watcher_running(cfg):
+    for who in (None, 'claude', 'codex'):
+        lock = watch_lock(cfg, who)
+        if lock is None:
+            return True
+        lock.close()
+    return False
 
 
 def running_in():
@@ -1017,10 +1036,11 @@ def running_in():
 
 def cmd_watch(cfg, opts):
     here = running_in()
-    if here and here != cfg['dispatcher']['agent']:  # the team moved: this dispatcher stops, the other one runs
-        print(f"agentq watch: this team's dispatcher runs on {cfg['dispatcher']['agent']} now – stop this loop.")
+    agent = cfg['dispatcher']['agent']
+    if here and agent != 'both' and here != agent:  # the team moved: this dispatcher stops, the other one runs
+        print(f"agentq watch: this team's dispatcher runs on {agent} now – stop this loop.")
         return 1
-    lock = watch_lock(cfg)
+    lock = watch_lock(cfg, here if agent == 'both' else None)
     if lock is None:
         print('agentq watch: already running – nothing to do.')
         return 0
@@ -1519,9 +1539,7 @@ def cmd_resume(cfg, opts):
     was = state.pop('paused', None)
     save_state(cfg, state)
     print('resumed: the watcher plans again from its next poll' if was else 'was not paused')
-    lock = watch_lock(cfg)
-    if lock is not None:
-        lock.close()
+    if not watcher_running(cfg):
         print(f"the watcher is not running: send the dispatcher ({cfg['dispatcher']['session'] or 'no session id in the config'}) "
               f'"Start the watcher"')
 
@@ -1627,14 +1645,11 @@ def cmd_health(cfg, opts):
     beat = state.get('watch', {})
     problems = []
     paused = state.get('paused')
-    lock = watch_lock(cfg)
+    running = watcher_running(cfg)
     if paused:  # a pause is the owner's word; only a forgotten one is a problem
-        if lock is not None:
-            lock.close()
         if moment - parse_time(paused['at']) > dt.timedelta(hours=cfg['stale_hours']):
             problems.append(texts['health_paused'].format(since=paused['at'], why=paused['why']))
-    elif lock is not None:
-        lock.close()
+    elif not running:
         exited = beat.get('exited')
         if not (exited and exited == beat.get('beat') and moment - parse_time(exited) < grace):
             problems.append(texts['health_watch'].format(since=beat.get('beat') or 'never'))
@@ -1977,10 +1992,15 @@ def cmd_team(cfg, opts):
     """Move the whole team – dispatcher and every role – to Claude or to another agent such as codex."""
     def change(raw):
         raw.setdefault('dispatcher', {})['agent'] = opts.agent
-        for r in raw.setdefault('roles', [{**x, 'session': ''} for x in DEFAULT_ROLES]):
-            r['agent'] = opts.agent
+        if opts.agent != 'both':  # both: each role keeps its own agent
+            for r in raw.setdefault('roles', [{**x, 'session': ''} for x in DEFAULT_ROLES]):
+                r['agent'] = opts.agent
     cfg = save_config(cfg, change)
     folder = cfg['dispatcher']['folder'] or '<the dispatcher folder>'
+    if opts.agent == 'both':
+        print('a Claude and a Codex dispatcher may now run side by side; claims keep them from sharing a task. '
+              'Roles keep their own agent (agentq role <name> --agent claude|codex).')
+        return
     print(f'the team runs on {opts.agent} now; the other dispatcher stops at its next watch.')
     if opts.agent == 'claude':
         print(f"Now: send the Claude dispatcher ({cfg['dispatcher']['session'] or 'no session id'}) \"Start the watcher\"; "
@@ -2177,7 +2197,7 @@ def main(argv=None):
     te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
     te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
-    tm.add_argument('agent', choices=('claude', 'codex'))
+    tm.add_argument('agent', choices=('claude', 'codex', 'both'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
     sc.add_argument('role')
     sc.add_argument('count', type=int)

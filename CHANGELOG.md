@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.39 – 2026-10-18
+- Several dispatchers at once: `agentq team both` lets a Claude and a Codex dispatcher run side by side (one watcher lock each); the owner's words are forwarded only by the computer whose claim holds the task; a stale-PR task already on the board is not opened again; the full test suite runs only on `tests.host` when set.
+
 ## 0.2.38 – 2026-10-18
 - Safe across computers: `next` and `assign` claim a task with a marked comment, read it back and keep it only when theirs is the earliest claim of the last 10 minutes; a loser deletes its claim and takes the next task. Workers on any number of computers, and even two dispatchers, never share a task.
 

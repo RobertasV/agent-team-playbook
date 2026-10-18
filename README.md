@@ -47,7 +47,7 @@ A role may run in Codex or another agent instead of a Claude session: `agentq ro
 
 ## Many computers
 
-One dispatcher per project is enough: it only sorts new tasks into roles. Workers can run on any number of computers: each pulls with `agentq next <role> --wait` (or is a Claude session the dispatcher sends to). Taking a task is safe across computers: the taker posts a claim, reads the comments back, and only the earliest claim of the last ten minutes wins – a loser deletes its claim and takes the next task. GitHub is the only shared state, so every computer needs `gh` signed in as the AI account and the project's config.
+One dispatcher per project is enough: it only sorts new tasks into roles. Several may run too (`agentq team both` lets a Claude and a Codex dispatcher work side by side): claims keep them from sharing a task, words are forwarded only by the computer that holds the task, a stale-PR task is opened once, and the full test suite runs on the computer named in `tests.host`. Workers can run on any number of computers: each pulls with `agentq next <role> --wait` (or is a Claude session the dispatcher sends to). Taking a task is safe across computers: the taker posts a claim, reads the comments back, and only the earliest claim of the last ten minutes wins – a loser deletes its claim and takes the next task. GitHub is the only shared state, so every computer needs `gh` signed in as the AI account and the project's config.
 
 ## Install into a project
 

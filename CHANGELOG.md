@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.19 – 2026-10-18
+- The dispatcher's CLAUDE.md: read the ended watcher's output file first, every time; never assume what it says or that a watcher still runs.
+
 ## 0.2.18 – 2026-10-18
 - A watcher started with `&` or nohup (its parent gone) stops at once: its end would wake nobody and the team would stall silently. The dispatcher's CLAUDE.md says to start it only with run_in_background.
 

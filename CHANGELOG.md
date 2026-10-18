@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.22 – 2026-10-18
+- `agentq scale <role> N`: N sessions of a role work in parallel. More than exist: it lists the numbered sessions to start (in the team's sidebar group) and `role --add-session` records them. Fewer: the rest rest – no new tasks, never deleted – and are reused first when the number grows again.
+
 ## 0.2.21 – 2026-10-18
 - Fewer tokens in coordination: the dispatcher sends a role one line ("run agentq brief N and act on it") instead of reading and re-sending the whole task; the role reads the task itself, once. Reminders are one line in the plan too.
 

@@ -195,7 +195,9 @@ def role_entry(raw):
             'shots': [], **raw}
     role.setdefault('merge', role['mode'] == 'programmer')
     role['sessions'] = [x for x in (raw.get('sessions') or [raw.get('session')]) if x]  # several sessions: a pool
-    role['session'] = role['sessions'][0] if role['sessions'] else ''
+    active = raw.get('active')
+    role['pool'] = role['sessions'][:active] if active is not None else role['sessions']  # the rest rest, kept
+    role['session'] = (role['pool'] or role['sessions'] or [''])[0]
     if role['mode'] not in MODES:
         raise Fail(f'role {role["role"]}: mode must be one of {", ".join(MODES)}')
     return role
@@ -303,7 +305,7 @@ def session_of(role, sid=None):
 
 
 def capacity(role):
-    return max(1, len(role['sessions']))
+    return max(1, len(role['pool']))
 
 
 def holder_of(state, role, ref):
@@ -316,7 +318,7 @@ def free_session(state, role, held_refs):
     holders = state.get('holders', {})
     taken = {holders.get(r) for r in held_refs if holders.get(r) in role['sessions']}
     unknown = sum(1 for r in held_refs if holders.get(r) not in role['sessions'])
-    free = [x for x in role['sessions'] if x not in taken][unknown:]
+    free = [x for x in role['pool'] if x not in taken][unknown:]
     return free[0] if free else role['session']
 
 
@@ -1598,11 +1600,41 @@ def print_roles_table(cfg):
     for r in cfg['roles']:
         n = f"{r['n']}/{float(r['hours']):g}h" if r['mode'] == 'checker' else '-'
         print(f"{r['role']} | {r['label']} | {r['mode']} | {n} | {','.join(r['paths']) or '-'} | {r['model'] or '-'} | "
-              f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {', '.join(r['sessions']) or 'MISSING'}")
+              f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {', '.join(r['pool']) or 'MISSING'}"
+              + (f" (resting: {', '.join(r['sessions'][len(r['pool']):])})" if len(r['sessions']) > len(r['pool']) else ''))
     d = cfg['dispatcher']
     print(f"dispatcher | - | - | - | - | {d.get('model') or '-'} | {d.get('effort') or '-'} | - | "
           f"{d['session'] or 'MISSING'} | folder {d['folder'] or '-'}")
     print(f"sidebar group: {cfg.get('team_group') or 'MISSING'}")
+
+
+def cmd_scale(cfg, opts):
+    """N sessions of a role work in parallel. More than exist: what to start. Fewer: the rest rest and are kept."""
+    if opts.count < 1:
+        raise Fail('at least 1')
+    name = role_by_name(cfg, opts.role)['role']
+
+    def change(raw):
+        roles = raw.setdefault('roles', [{**r, 'session': ''} for r in DEFAULT_ROLES])
+        entry = next(r for r in roles if r['role'] == name)
+        entry['active'] = opts.count
+
+    cfg = save_config(cfg, change)
+    role = role_by_name(cfg, name)
+    have = len(role['sessions'])
+    print(f"{name}: {opts.count} sessions work in parallel ({have} exist).")
+    if opts.count > have:
+        project = cfg.get('project_name') or cfg['repos'][0].split('/')[-1]
+        group = cfg.get('team_group') or 'the team\'s sidebar group (none recorded)'
+        print('Now, for each missing session:')
+        for m in range(have + 1, opts.count + 1):
+            print(f'{m - have}. start a session "{project} {name} {m}" in {cfg.get("checkout") or "the project folder"} '
+                  f'(model {role["model"] or "as the role"}, effort {role["effort"] or "as the role"}), move it into '
+                  f'{group}, then run `agentq role {name} --add-session <its id>`')
+    elif opts.count < have:
+        print(f"Sessions {opts.count + 1}–{have} rest: no new tasks; a task they hold they finish. "
+              f"They are kept and reused when the number grows again.")
+    write_roles(cfg)
 
 
 def cmd_role(cfg, opts):
@@ -1629,6 +1661,10 @@ def cmd_role(cfg, opts):
                     'description'):
             if getattr(opts, key) is not None:
                 entry[key] = getattr(opts, key)
+        if opts.add_session:
+            listed = entry.get('sessions') or ([entry['session']] if entry.get('session') else [])
+            entry['sessions'] = listed + [x for x in opts.add_session if x not in listed]
+            entry['session'] = entry['sessions'][0]
         if opts.sessions is not None:
             entry['sessions'] = [x.strip() for x in opts.sessions.split(',') if x.strip()]
             entry['session'] = entry['sessions'][0] if entry['sessions'] else ''
@@ -1760,6 +1796,10 @@ def main(argv=None):
     ro.add_argument('--merge', choices=('yes', 'no'))
     ro.add_argument('--session')
     ro.add_argument('--sessions', help='several sessions for one role (a pool), comma-separated')
+    ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
+    sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
+    sc.add_argument('role')
+    sc.add_argument('count', type=int)
     ro.add_argument('--description')
     ro.add_argument('--example', action='append', help='an example task (repeat for 2–3)')
     ro.add_argument('--shot', action='append', help='a reference screenshot, copied into the dispatcher\'s examples/')
@@ -1780,7 +1820,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
-                'link': cmd_link, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

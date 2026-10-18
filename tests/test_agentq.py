@@ -342,6 +342,23 @@ class TeamTest(Base):
         self.assertIn(f'programmer holds {REPO}#2 but has been quiet since 2026-01-02T11:00:00Z: send this line to '
                       f'programmer (local_p2): `You hold {REPO}#2', out)
 
+    def test_scale_starts_numbered_sessions_and_keeps_resting_ones(self):
+        self.data({REPO: {'labels': []}})
+        out = self.run_tool('scale', 'programmer', '3').stdout
+        self.assertIn('programmer: 3 sessions work in parallel (1 exist).', out)
+        self.assertIn('1. start a session "app programmer 2"', out)
+        self.assertIn('2. start a session "app programmer 3"', out)
+        self.run_tool('role', 'programmer', '--add-session', 'local_p2', '--add-session', 'local_p3')
+        self.assertIn('local_p, local_p2, local_p3', self.run_tool('role', 'programmer').stdout)
+        self.assertIn('Sessions 2–3 rest', self.run_tool('scale', 'programmer', '1').stdout)
+        table = self.run_tool('role', 'programmer').stdout
+        self.assertIn('| local_p (resting: local_p2, local_p3)', table)
+        self.data({REPO: {'open': [issue(1, 'A', ['prog', 'doing']), issue(2, 'B', ['prog'])]}})
+        self.assertIn('queued', self.run_tool('assign', '2', 'programmer').stdout)
+        out = self.run_tool('scale', 'programmer', '2').stdout
+        self.assertNotIn('start a session', out)  # reused, nothing new
+        self.assertIn('to programmer (local_p2)', self.run_tool('assign', '2', 'programmer').stdout)
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')

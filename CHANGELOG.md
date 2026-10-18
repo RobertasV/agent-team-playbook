@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.50 – 2026-10-18
+- From a Codex review of the Codex part: a wake that fails is undone (the task back in the queue, the worker idle again); `codex queue`, `open` and `lsof` have time limits and a failed `open` is reported; a Codex dispatcher's watcher is reported running only once it holds its lock; an archived or deleted Codex worker counts as missing for `codex-workers`; paths and role names in Codex commands are shell-quoted; the skill says a team Codex task needs full access.
+
 ## 0.2.49 – 2026-10-18
 - One Codex task is one worker: registering it under a new name replaces the old name, so the watcher never wakes one task for two tasks.
 

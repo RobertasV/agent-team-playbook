@@ -522,7 +522,12 @@ class TeamTest(Base):
         self.as_codex('next', 'designer', '--as', 'codex-designer', thread='t2')
         self.as_codex('next', 'checker', '--as', 'codex-checker', thread='t3')
         self.assertEqual(self.faked('open').count('codex://threads/new?'), 3)
+        for thread in ('t1', 't2', 't3'):
+            self.rollout(thread, T0)
         self.assertIn('none missing', self.run_tool('codex-workers').stdout)
+        os.remove(os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02',
+                               'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
+        self.assertIn('new task for codex-designer', self.run_tool('codex-workers').stdout)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
         self.data({REPO: {'open': []}})
@@ -591,6 +596,21 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now=T1)
         self.assertEqual(self.faked('codex').count('queue'), 1)  # it works on it: woken once
 
+    def test_a_wake_that_fails_is_undone(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': []}})
+        self.as_codex('next', 'designer', '--as', 'cx')
+        with open(os.path.join(self.dir.name, 'bin', 'fake-codex'), 'w') as f:
+            f.write('#!/bin/sh\necho "no such thread" >&2\nexit 1\n')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
+        self.run_tool('watch', '--once')
+        self.assertIn('could not be reached (no such thread)', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'])
+        state = self.state()
+        self.assertEqual(state.get('holders', {}), {})
+        self.assertTrue(state['codex']['cx']['idle'])  # woken again at the next poll
+
     def test_with_codex_closed_its_workers_get_nothing(self):
         self.data({REPO: {'labels': []}})
         self.run_tool('role', 'designer', '--agent', 'codex')
@@ -646,7 +666,7 @@ class TeamTest(Base):
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})
         self.run_tool('team', 'both')
-        self.assertIn('runs on its own now', self.as_codex('watch', '--max-minutes', '0', thread='d1').stdout)
+        self.assertIn('runs on its own now', self.as_codex('watch', '--max-minutes', '0.05', thread='d1').stdout)
         self.assertEqual(self.state()['dispatcher_thread'], 'd1')
         self.assertIn('plan sent to the dispatcher', self.run_tool('watch', '--wake', '--once').stdout)
         self.assertIn(f'queue --thread d1 --message agentq plan', self.faked('codex'))

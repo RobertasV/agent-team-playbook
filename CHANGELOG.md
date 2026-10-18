@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.65 – 2026-10-18
+- Every command accepts `--as <role>` (agents add it out of habit; `agentq checked … --as testuotojas` failed).
+
 ## 0.2.64 – 2026-10-18
 - Workers clean up: every brief and the skill say to delete what was made for the task outside the project (scratch copies, test checkouts, worktrees, build output) before finishing, never anything else.
 - The hourly health check reports when free disk space falls below `disk_min_gb` (default 30 GB).

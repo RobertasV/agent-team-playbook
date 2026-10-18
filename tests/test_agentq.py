@@ -1070,6 +1070,10 @@ class TeamTest(Base):
         self.assertEqual(self.body(made), '🤖 checker: evidence: …')
         self.assertEqual(made[made.index('--label') + 1], 'prog')
 
+    def test_an_extra_as_role_is_accepted(self):
+        self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]}})
+        self.run_tool('done', '7', 'fixed', '--as', 'checker')
+
     def test_done_comments_drops_working_and_closes(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['design', 'doing'])]}})
         self.run_tool('done', '7', 'fixed the colour; checked on a phone')

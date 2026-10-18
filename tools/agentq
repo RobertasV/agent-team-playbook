@@ -2835,6 +2835,9 @@ def main(argv=None):
     ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
     ini.add_argument('--project', help='the project folder (default: here)')
     ini.add_argument('--codex', action='store_true', help='also point AGENTS.md at the skill (codex and other agents)')
+    for name, parser in sub.choices.items():  # agents add `--as <role>` out of habit: accepted everywhere
+        if name not in ('next', 'open') and not any('--as' in a.option_strings for a in parser._actions):
+            parser.add_argument('--as', dest='who', help=argparse.SUPPRESS)
     opts = p.parse_args(argv)
     if not opts.cmd:  # plain `agentq`: what it can do
         p.print_help()

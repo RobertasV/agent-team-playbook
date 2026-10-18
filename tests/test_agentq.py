@@ -468,6 +468,23 @@ class TeamTest(Base):
         self.run_tool('done', '7', 'fixed, footer too')  # the words are delivered now
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '7', '-R', REPO])
 
+    def test_an_urgent_word_from_the_owner_makes_the_task_first(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['priority_words'] = ['SKUBU', 'priority']
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.data({REPO: {'open': [issue(1, 'Old bug', ['prog']),
+                                   issue(5, 'Checkout broken', ['prog'], body='skubu! people cannot pay'),
+                                   issue(6, 'Footer', ['prog'], comments=[said('boss', 'Priority, please', '2026-01-02T11:00:00Z')]),
+                                   issue(7, 'Spam priority', ['prog'], author='stranger')]}})
+        out = self.run_tool('watch', '--once').stdout
+        self.assertIn(f'next task for programmer: run `agentq assign {REPO}#5 programmer`', out)
+        added = [c for c in self.calls(['issue', 'edit']) if '--add-label' in c and 'priority' in c]
+        self.assertEqual(sorted(c[2] for c in added), ['5', '6'])
+        self.run_tool('watch', '--once', now=T2)
+        self.assertEqual(len([c for c in self.calls(['issue', 'edit']) if 'priority' in c]), 2)  # once per issue
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')

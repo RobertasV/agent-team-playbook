@@ -65,7 +65,7 @@ Nothing is installed outside the project and the two folders above. To uninstall
 
 ## Daily use
 
-You write issues and comments. To change how many sessions of a role work in parallel, say e.g. "10 programmers": the session creates the missing numbered sessions in the team's group; fewer later just rests the extra ones, and more reuses them. To stop or restart the whole team, say "stop" or "go" to any team session; it pauses or resumes the dispatcher's work and restarts the watcher when needed. Labels you may use if you like: `priority`, `blocking`, `hard` (highest effort), `deferred`. To give a rule to the dispatcher, say it to any session, e.g. "banners go to the designer". The session runs `agentq teach --owner "banners → designer"`.
+You write issues and comments. To change how many sessions of a role work in parallel, say e.g. "10 programmers": the session creates the missing numbered sessions in the team's group; fewer later just rests the extra ones, and more reuses them. To stop or restart the whole team, say "stop" or "go" to any team session; it pauses or resumes the dispatcher's work and restarts the watcher when needed. Write the priority label's word (e.g. SKUBU) anywhere in an issue or comment and it goes first. Labels you may use if you like: `priority`, `blocking`, `hard` (highest effort), `deferred`. To give a rule to the dispatcher, say it to any session, e.g. "banners go to the designer". The session runs `agentq teach --owner "banners → designer"`.
 
 The commands agents use:
 

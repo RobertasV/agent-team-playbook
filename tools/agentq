@@ -267,7 +267,8 @@ def load_config(path):
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
-    cfg['clear_every'] = cfg.get('clear_every', 0)  # off: after a clear a watcher started before it wakes nobody
+    cfg['clear_every'] = cfg.get('clear_every', 0)
+    cfg['priority_words'] = cfg.get('priority_words') or [cfg['labels']['priority']]  # off: after a clear a watcher started before it wakes nobody
     tests = {'mode': 'per-task', 'full': '', 'every': 5, 'checkout': '', 'branch': 'main', 'timeout_minutes': 60,
              'role': '', **cfg.get('tests', {})}
     tests['checkout'] = os.path.expanduser(tests['checkout'])
@@ -856,6 +857,27 @@ def check_tests(cfg, state, repo, start, plan):
     ts['since'] = iso(start)
 
 
+def mark_urgent(cfg, repo, item, issues, urgent):
+    """The owner wrote an urgent word (e.g. SKUBU) in the title, the text or a comment: the issue gets the priority
+    label, so the next free session takes it first. Once per issue: a label the owner later removes stays removed."""
+    ref = f"{repo}#{item['number']}"
+    label = cfg['labels']['priority']
+    if item.get('state', 'OPEN') != 'OPEN' or ref in urgent or label in labels_of(item):
+        return
+    owners = set(cfg['owner_accounts'])
+    words = [w for w in cfg['priority_words'] if w]
+    pattern = re.compile(r'(?<!\w)(' + '|'.join(re.escape(w) for w in words) + r')(?!\w)', re.I) if words else None
+    texts = [c.get('body') or '' for c in item.get('comments', []) if login_of(c) in owners]
+    if login_of(item) in owners:
+        texts += [item.get('title') or '', item.get('body') or '']
+    if pattern and any(pattern.search(t) for t in texts):
+        relabel(repo, item['number'], add=[label])
+        urgent[ref] = iso(now())
+        for issue in issues:
+            if issue['number'] == item['number']:
+                issue['labels'] = issue['labels'] + [{'name': label}]
+
+
 def build_plan(cfg, state, start):
     """Read the board; return the steps for the dispatcher. An owner's comment stays in the plan until a brief
     delivers it (up to forward_hours), so a missed plan or a stopped watcher loses nothing."""
@@ -870,8 +892,10 @@ def build_plan(cfg, state, start):
         taken = set()
         news, fresh = {}, []
         first = delivered is None or repo not in delivered
+        urgent = state.setdefault('urgent', {})
         for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '100',
-                            '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments'):
+                            '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments,body,author'):
+            mark_urgent(cfg, repo, item, issues, urgent)
             answered_at = max([c['createdAt'] for c in item.get('comments', [])
                                if login_of(c) == cfg['agent_account']] or [''])
             # first run: only words on an open issue that waits for the owner or is in progress, with no agent

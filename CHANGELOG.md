@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.31 – 2026-10-18
+- Clearing the dispatcher is off by default (`clear_every` 0): in the live test, a watcher started before the clear woke nobody when it ended, and the team stood still. It stays available for when a safe order is found.
+
 ## 0.2.30 – 2026-10-18
 - Removing a role removes its rules and lessons; roles.md never shows a rule for a role that no longer exists.
 

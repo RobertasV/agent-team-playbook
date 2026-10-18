@@ -266,7 +266,7 @@ def load_config(path):
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
-    cfg['clear_every'] = cfg.get('clear_every', 20)
+    cfg['clear_every'] = cfg.get('clear_every', 0)  # off: after a clear a watcher started before it wakes nobody
     tests = {'mode': 'per-task', 'full': '', 'every': 5, 'checkout': '', 'branch': 'main', 'timeout_minutes': 60,
              'role': '', **cfg.get('tests', {})}
     tests['checkout'] = os.path.expanduser(tests['checkout'])

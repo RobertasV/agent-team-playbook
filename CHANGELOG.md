@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.27 – 2026-10-18
+- Test modes (`agentq tests per-task|batched`, config `tests`): batched lets each task run only the tests that touch it while the watcher runs the full suite every `tests.every` finished tasks, detached, in its own checkout – no tokens. Green records the last green commit; red wakes the checker once with the commit range. Briefs say which mode applies; batch reports state the last full run.
+
 ## 0.2.26 – 2026-10-18
 - The dispatcher runs on a mid model (e.g. Sonnet) at low effort instead of the cheapest: the cheapest kept doubting the plan's session ids instead of following it (the owner's word). It wakes only when there is work, so the cost stays small.
 

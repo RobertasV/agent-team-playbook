@@ -62,6 +62,7 @@
   "escalate_minutes": 30,
   "check_minutes": 60,
   "accept_issues_from_others": false,
+  "tests": {"mode": "per-task", "full": "", "every": 5, "checkout": "", "branch": "main"},
   "texts": {
     "take": "taking this.",
     "ask": "{text}",

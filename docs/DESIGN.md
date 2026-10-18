@@ -53,6 +53,10 @@ A role may have several sessions (a pool, e.g. five programmers): one label, one
 
 Busy is read from the board, so a role never gets a second task while it works on one. A direct chat between the owner and a session is not on the board; a task message then waits until the session answers the owner.
 
+## Test modes
+
+Decided by the owner on 2026-10-18, so programming goes faster (a full suite after every task took 15–25 minutes). Per-task: each task runs the whole suite. Batched: a task runs only the tests that touch it; the watcher (a script, no tokens) runs the whole suite every N finished tasks on the newest main in its own checkout. Green records the last green commit; red wakes the checker once with the range since the last green one, to find the culprit, tell a real bug from a flaky test and open an urgent issue. The checker's batch report states the last full run.
+
 ## Sharing between projects
 
 Decided by the owner on 2026-10-17. When the team runs in several projects, the owner may link them (`agentq link other/repo "what belongs there"` in each). Sharing is on while a link exists.

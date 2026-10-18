@@ -76,6 +76,10 @@ Only when the owner asks for it in words in this project. A session never starts
 7. Ask: "Turn on the marketer?" Yes → start its session, `agentq role marketer --session <id>`. No → the programmer does marketing tasks.
 8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; start its session; record `--session`. If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no. Several sessions doing the same job are one role with a pool, never a second role per extra session.
 
+## Test mode
+
+The owner says which, in one word → `agentq tests per-task` or `agentq tests batched`. Per-task: each task runs the whole suite before it finishes. Batched: each task runs only what touches the change (the test that fails without the fix, the nearest unit tests, one or two related end-to-end tests); the watcher runs the whole suite itself every `tests.every` tasks in its own checkout, and a red run wakes the checker with the commits since the last green one. The brief says which mode applies.
+
 ## How many work in parallel
 
 The owner says e.g. "10 programmers" → `agentq scale <role> 10` and do what it prints: start each missing session with the printed number in its title (the owner asked, so start them yourself), move it into the team's sidebar group, record it with `agentq role <role> --add-session <id>`. Fewer ("3 programmers") → `agentq scale <role> 3`: the rest get no new tasks and finish what they hold. Never archive or delete them: the next "more" reuses them first (unarchive one if the owner archived it).

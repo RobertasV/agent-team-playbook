@@ -373,6 +373,50 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now='2026-01-02T14:00:00Z')
         self.assertEqual(len(self.calls(['issue', 'create'])), 1)
 
+    def test_batched_tests_run_by_the_watcher_and_red_wakes_the_checker(self):
+        import time
+        origin, co = os.path.join(self.dir.name, 'origin'), os.path.join(self.dir.name, 'testco')
+        git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@t']
+        subprocess.run(['git', 'init', '-q', '-b', 'main', origin], check=True)
+        open(os.path.join(origin, 'ok'), 'w').close()
+        subprocess.run(git + ['-C', origin, 'add', '.'], check=True)
+        subprocess.run(git + ['-C', origin, 'commit', '-qm', 'green'], check=True)
+        subprocess.run(['git', 'clone', '-q', origin, co], check=True)
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['tests'] = {'mode': 'per-task', 'full': 'test -f ok', 'every': 2, 'checkout': co}
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.assertIn('tests: batched, full run every 2 tasks: test -f ok', self.run_tool('tests', 'batched').stdout)
+
+        def finished(*numbers, at):
+            self.data({REPO: {'open': [], 'closed': [closed(n, f'T{n}', at) for n in numbers]}})
+
+        def wait_for_result(now):
+            for _ in range(50):
+                out = self.run_tool('watch', '--once', now=now).stdout
+                if 'running' not in json.load(open(self.config + '.state.json')).get('tests', {}):
+                    return out
+                time.sleep(0.2)
+            self.fail('the full run did not finish')
+        finished(at='2026-01-02T11:00:00Z')
+        self.run_tool('watch', '--once', now=T0)  # starts counting
+        finished(10, 11, at='2026-01-02T12:01:00Z')
+        self.run_tool('watch', '--once', now='2026-01-02T12:06:00Z')  # two tasks done: the full run starts
+        wait_for_result('2026-01-02T12:07:00Z')
+        self.assertIn('last full run: green', self.run_tool('tests').stdout)
+        subprocess.run(git + ['-C', origin, 'rm', '-q', 'ok'], check=True)
+        subprocess.run(git + ['-C', origin, 'commit', '-qm', 'break'], check=True)
+        finished(12, 13, at='2026-01-02T12:08:00Z')
+        self.run_tool('watch', '--once', now='2026-01-02T12:13:00Z')
+        out = wait_for_result('2026-01-02T12:14:00Z')
+        self.assertIn('the full test run is red at', out)
+        self.assertIn('send this line to session local_c', out)
+        self.assertIn('(git log ', out)
+        self.data({'api': {f'repos/{REPO}/issues/5': {'title': 'Bug', 'body': 'x', 'labels': [{'name': 'prog'}],
+                                                       'user': {'login': 'boss'}}}})
+        self.assertIn('The full suite runs on its own every 2 tasks.', self.run_tool('brief', '5').stdout)
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')

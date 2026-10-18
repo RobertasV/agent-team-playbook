@@ -15,6 +15,7 @@ import html
 import json
 import os
 import re
+from shlex import quote as shlex_quote
 import subprocess
 import sys
 import time
@@ -71,6 +72,13 @@ DEFAULT_TEXTS = {
     'stale_pr_title': 'PR #{number} untouched for {days} days: finish it or close it',
     'stale_pr_body': ('{url} "{title}" has not moved since {updated}. Finish it (merge when it is right), or close it with a '
                       'comment saying what replaced it. Then close this issue.'),
+    'tests_per_task': 'Tests: run the whole test suite before you finish.',
+    'tests_batched': ('Tests: run only what touches this change – the test that fails without the fix, the nearest unit '
+                      'tests and one or two related end-to-end tests. The full suite runs on its own every {every} tasks.'),
+    'tests_red': ('The full test run is red at {sha} (last green: {green}). Log: {log}. Find the commit that broke it '
+                  '(git log {green}..{sha}), tell a real bug from a flaky test, and open an issue with the "{priority}" '
+                  'label for each real bug.'),
+    'tests_line': 'Full test run: {result}.',
     'stalled': ("{role} holds {ref}, but its session ({session}) has been idle since {last} and did not react to a "
                 "reminder at {at}. Open that session and tell it what to do, or say \"release {ref}\" to any team session."),
     'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
@@ -245,6 +253,10 @@ def load_config(path):
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
+    tests = {'mode': 'per-task', 'full': '', 'every': 5, 'checkout': '', 'branch': 'main', 'timeout_minutes': 60,
+             'role': '', **cfg.get('tests', {})}
+    tests['checkout'] = os.path.expanduser(tests['checkout'])
+    cfg['tests'] = tests
     cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
     cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)
     cfg['app_sessions'] = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or cfg.get('app_sessions') or
@@ -758,6 +770,71 @@ def check_prs(cfg, state, repo, start):
         seen[key] = pr['updatedAt']
 
 
+def tests_role(cfg):
+    named = cfg['tests']['role']
+    if named:
+        return role_by_name(cfg, named)
+    return next((r for r in cfg['roles'] if r['mode'] == 'checker'), default_role(cfg))
+
+
+def check_tests(cfg, state, repo, start, plan):
+    """Batched test mode: every N finished tasks the watcher runs the full suite itself, detached, in its own checkout
+    (no tokens). Green is recorded; red wakes the checker once with the commit range since the last green run."""
+    t = cfg['tests']
+    if t['mode'] != 'batched' or not t['full'] or not t['checkout'] or repo != cfg['repos'][0]:
+        return
+    ts = state.setdefault('tests', {})
+    base = cfg['state_file'] + '.tests'
+    run = ts.get('running')
+    if run:
+        code_file = f"{base}.{run['id']}.code"
+        if os.path.exists(code_file):
+            with open(code_file) as f:
+                code = f.read().strip()
+            sha = open(f"{base}.{run['id']}.sha").read().strip() if os.path.exists(f"{base}.{run['id']}.sha") else '?'
+            ok = code == '0'
+        elif start - parse_time(run['at']) > dt.timedelta(minutes=t['timeout_minutes']):
+            try:
+                os.killpg(run['pid'], 15)
+            except OSError:
+                pass
+            ok, sha = False, run.get('sha', '?')
+        else:
+            return
+        ts.pop('running')
+        log = f"{base}.{run['id']}.log"
+        ts['last'] = {'sha': sha, 'ok': ok, 'at': iso(start), 'log': log}
+        if ok:
+            ts['green'] = sha
+        else:
+            role = tests_role(cfg)
+            line = cfg['texts']['tests_red'].format(sha=sha, green=ts.get('green') or 'none yet', log=log,
+                                                    priority=cfg['labels']['priority'])
+            plan.append(('tests_red', sha, role, line, None, role['session']))
+        return
+    ts.setdefault('since', iso(start))
+    last = ts.get('counted')
+    if last and start - parse_time(last) < dt.timedelta(minutes=5):
+        return
+    ts['counted'] = iso(start)
+    not_tasks = {cfg['labels']['batch'], cfg['labels']['health']}
+    done = [i for i in gh_json('issue', 'list', '-R', repo, '--state', 'closed', '--limit', '200', '--search',
+                               f"closed:>={ts['since']}", '--json', 'number,labels,closedAt,stateReason')
+            if parse_time(i['closedAt']) >= parse_time(ts['since']) and i.get('stateReason') != 'NOT_PLANNED'
+            and not not_tasks & set(labels_of(i))]
+    if len(done) < int(t['every']):
+        return
+    run_id = start.strftime('%Y%m%d%H%M%S')
+    co = shlex_quote(t['checkout'])
+    script = (f"cd {co} && git fetch -q origin && git checkout -q --detach origin/{shlex_quote(t['branch'])} && "
+              f"git rev-parse HEAD > {shlex_quote(base + '.' + run_id + '.sha')} && ({t['full']}); "
+              f"echo $? > {shlex_quote(base + '.' + run_id + '.code')}")
+    with open(f'{base}.{run_id}.log', 'w') as log:
+        proc = subprocess.Popen(['sh', '-c', script], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    ts['running'] = {'id': run_id, 'pid': proc.pid, 'at': iso(start)}
+    ts['since'] = iso(start)
+
+
 def build_plan(cfg, state, start):
     """Read the board; return the steps for the dispatcher. An owner's comment stays in the plan until a brief
     delivers it (up to forward_hours), so a missed plan or a stopped watcher loses nothing."""
@@ -808,6 +885,7 @@ def build_plan(cfg, state, start):
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
         check_prs(cfg, state, repo, start)
+        check_tests(cfg, state, repo, start, plan)
         cache = {}
         for role in cfg['roles']:
             slots = capacity(role) - len(busy_with(cfg, issues, role)) - (role['role'] in taken)
@@ -847,6 +925,8 @@ def render_plan(cfg, plan, start):
             line = nudge_text(cfg, ref, since)
             lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send this line to '
                          f'{session_of(role, sid)}: `{line}`')
+        elif kind == 'tests_red':
+            lines.append(f'{n}. the full test run is red at {ref}: send this line to {session_of(role, sid)}: `{title}`')
         elif kind == 'held':
             lines.append(f'{n}. {role["role"]} holds {ref}: call get_session for {sid or role["session"]}, then run '
                          f'`{q} held {ref} --running <its isRunning> --last <its lastActivityAt>` and do what it prints.')
@@ -1061,6 +1141,9 @@ def cmd_brief(cfg, opts):
         out += ['---', texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
         if cfg['links'] and not batch:
             out.append(texts['finish_links'].format(ref=ref))
+        if not batch and role['mode'] == 'programmer':
+            out.append(texts['tests_batched' if cfg['tests']['mode'] == 'batched' else 'tests_per_task']
+                       .format(every=cfg['tests']['every']))
     print('\n'.join(out))
 
 
@@ -1324,6 +1407,10 @@ def cmd_batch(cfg, opts):
     commit = git(cfg['checkout'], 'rev-parse', 'HEAD').strip() if cfg.get('checkout') else 'not pinned (no checkout in the config)'
     body = cfg['texts']['batch_body'].format(role=role['role'], commit=commit,
                                              list='\n'.join(f"- #{i['number']} {i['title']}" for i in items))
+    if cfg['tests']['mode'] == 'batched':
+        last = state.get('tests', {}).get('last')
+        result = f"{'green' if last['ok'] else 'red'} at {last['sha']}" if last else 'not run yet'
+        body += '\n' + cfg['texts']['tests_line'].format(result=result)
     mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items]})
     number = create_issue(repo, cfg['texts']['batch_title'].format(refs=refs), f'{body}\n\n<!-- agentq:batch {mark} -->',
                           [role['label'], cfg['labels']['batch'], cfg['labels']['working']])
@@ -1682,6 +1769,23 @@ def cmd_scale(cfg, opts):
     write_roles(cfg)
 
 
+def cmd_tests(cfg, opts):
+    """The test mode in one word: per-task (each task runs the whole suite) or batched (the watcher runs it every N tasks)."""
+    if opts.mode:
+        def change(raw):
+            raw.setdefault('tests', {})['mode'] = opts.mode
+        cfg = save_config(cfg, change)
+    t = cfg['tests']
+    ts = load_state(cfg).get('tests', {})
+    print(f"tests: {t['mode']}" + (f", full run every {t['every']} tasks: {t['full'] or 'NO tests.full in the config'} "
+                                  f"in {t['checkout'] or 'NO tests.checkout in the config'}" if t['mode'] == 'batched' else ''))
+    if ts.get('last'):
+        last = ts['last']
+        print(f"last full run: {'green' if last['ok'] else 'red'} at {last['sha']} ({last['at']}); last green: {ts.get('green') or '-'}")
+    if ts.get('running'):
+        print(f"running since {ts['running']['at']}")
+
+
 def cmd_role(cfg, opts):
     """Add or change a role (or the dispatcher's session) in the config, then create its labels."""
     name = opts.name.strip()
@@ -1842,6 +1946,8 @@ def main(argv=None):
     ro.add_argument('--session')
     ro.add_argument('--sessions', help='several sessions for one role (a pool), comma-separated')
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
+    te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
+    te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
     sc.add_argument('role')
     sc.add_argument('count', type=int)
@@ -1865,7 +1971,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
-                'link': cmd_link, 'scale': cmd_scale, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

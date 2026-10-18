@@ -79,6 +79,7 @@ The commands agents use:
 | `teach "topic → role" [--owner]` | anyone | a rule for the dispatcher |
 | `health` | hourly timer | watcher alive, nothing stuck; problems go to one issue |
 | `nudge` · `held` | watcher, dispatcher | a reminder for a quiet session that holds a task |
+| `tests per-task\|batched` | any session, on the owner's word | each task runs the whole suite, or the watcher runs it every N tasks (red wakes the checker) |
 | `scale role N` | any session, on the owner's word | how many sessions of a role work in parallel; missing ones to start, extra ones rest |
 | `init` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder |
 | `queue` · `take` · `defer` · `check` | anyone | the 0.1 commands, still available |

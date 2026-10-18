@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.36 – 2026-10-18
+- `agentq next` refuses a role that does not pull (agent: claude) and tells the loop to stop, so a role switched back to Claude never has two workers.
+
 ## 0.2.35 – 2026-10-18
 - An urgent word from the owner (`priority_words`, default the priority label's name, e.g. SKUBU) in an issue's title, text or a comment gives it the priority label, so the next free session takes it first. Once per issue; any case; only the owner's words.
 

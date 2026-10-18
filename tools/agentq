@@ -1090,6 +1090,9 @@ def cmd_next(cfg, opts):
     """Pull mode, for agents outside the desktop app (codex, …): take this role's next task and print its brief.
     With --wait it waits without tokens until there is one (at most --max-minutes, then says to run it again)."""
     role = role_by_name(cfg, opts.role)
+    if not pulls(role):
+        print(f"{role['role']} does not pull (agent: claude): the dispatcher sends its tasks. Stop this loop.")
+        return 1
     worker = opts.who or role['role']
     deadline = time.time() + 60 * opts.max_minutes
     while True:

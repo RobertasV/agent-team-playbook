@@ -455,6 +455,8 @@ class TeamTest(Base):
         self.assertIn('it takes its tasks itself (agentq next). Nothing to send.', out)
         self.data({REPO: {'open': []}})
         self.assertIn('nothing for designer yet', self.run_tool('next', 'designer', '--wait', '--max-minutes', '0').stdout)
+        self.run_tool('role', 'designer', '--agent', 'claude')
+        self.assertIn('Stop this loop.', self.run_tool('next', 'designer', ok=False).stdout)
 
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},

@@ -67,6 +67,10 @@ DEFAULT_TEXTS = {
               "now with one command: agentq done / ask / route / wait."),
     'send_task': "Task {ref} for {role}, from the owner's queue: run agentq brief {ref} and act on it.",
     'send_news': 'The owner wrote more on {ref}, your task: run agentq brief {ref} --since {since} and act on it.',
+    'released': 'back in the queue: its session ({session}) has been quiet since {last} and did not react to a reminder.',
+    'stale_pr_title': 'PR #{number} untouched for {days} days: finish it or close it',
+    'stale_pr_body': ('{url} "{title}" has not moved since {updated}. Finish it (merge when it is right), or close it with a '
+                      'comment saying what replaced it. Then close this issue.'),
     'stalled': ("{role} holds {ref}, but its session ({session}) has been idle since {last} and did not react to a "
                 "reminder at {at}. Open that session and tell it what to do, or say \"release {ref}\" to any team session."),
     'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
@@ -235,6 +239,7 @@ def load_config(path):
     cfg['repeat_minutes'] = cfg.get('repeat_minutes', 30)
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
+    cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
     cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
     cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)
     cfg['app_sessions'] = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or cfg.get('app_sessions') or
@@ -709,9 +714,34 @@ def check_held(cfg, state, repo, issues, start, plan):
                                                           last=iso(last), at=nudge['at'])
                 report_health(cfg, state, [problem], needs_owner=True, close=False)
                 nudge['told'] = iso(start)
+                number = int(ref.split('#')[1])  # back to the queue, so a free session takes it
+                comment(cfg, repo, number, cfg['texts']['released'].format(session=sid, last=iso(last)), 'health')
+                relabel(repo, number, remove=[cfg['labels']['working']])
     for table in (nudges, checks, state.setdefault('holders', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
+
+
+def check_prs(cfg, state, repo, start):
+    """Hourly: an open pull request untouched for stale_pr_days becomes a task for the default role (once per stall)."""
+    if not cfg['stale_pr_days']:
+        return
+    seen = state.setdefault('prs', {})
+    last = seen.get(f'{repo}:checked')
+    if last and start - parse_time(last) < dt.timedelta(hours=1):
+        return
+    seen[f'{repo}:checked'] = iso(start)
+    role = default_role(cfg)
+    for pr in gh_json('pr', 'list', '-R', repo, '--state', 'open', '--limit', '100',
+                      '--json', 'number,title,updatedAt,url,isDraft'):
+        key = f"{repo}#{pr['number']}"
+        if start - parse_time(pr['updatedAt']) < dt.timedelta(days=cfg['stale_pr_days']) or seen.get(key) == pr['updatedAt']:
+            continue
+        texts = cfg['texts']
+        create_issue(repo, texts['stale_pr_title'].format(number=pr['number'], days=cfg['stale_pr_days']),
+                     f"🤖 health: " + texts['stale_pr_body'].format(url=pr['url'], title=pr['title'], updated=pr['updatedAt']),
+                     [role['label']])
+        seen[key] = pr['updatedAt']
 
 
 def build_plan(cfg, state, start):
@@ -763,6 +793,7 @@ def build_plan(cfg, state, start):
                 plan.append(('forward', ref, role, item['title'], min(times), holder_of(state, role, ref)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
+        check_prs(cfg, state, repo, start)
         cache = {}
         for role in cfg['roles']:
             slots = capacity(role) - len(busy_with(cfg, issues, role)) - (role['role'] in taken)

@@ -12,7 +12,7 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 - **It learns where tasks belong.** When a session gets a task that isn't its own, routing it on teaches the dispatcher. Your rules always outrank the agents' rules.
 - **Your words are never lost or reworded.** The dispatcher passes them on verbatim, with screenshots downloaded, even from private repositories.
 - **Everything is visible.** Every session is a normal session you can open. Every agent comment on GitHub comes from a separate AI account and starts with `🤖 <role>:`.
-- **Problems reach your phone.** An hourly health check (no tokens) opens one GitHub issue when the watcher stopped or a task got stuck. A role that holds a task but went quiet gets one reminder; if that does not help, the health issue asks for you.
+- **Problems reach your phone.** An hourly health check (no tokens) opens one GitHub issue when the watcher stopped or a task got stuck. A role that holds a task but went quiet gets one reminder; if that does not help, the task goes back to the queue and the health issue asks for you. A pull request left untouched for days becomes a task: finish it or close it.
 - **Projects can share tasks.** A task filed in the wrong project moves to the right one. A task that spans two projects is split, and each part links back to the other.
 - **Per project, in your language.** The team is installed per project, never globally. All label names and texts come from the config.
 

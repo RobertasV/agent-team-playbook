@@ -293,6 +293,8 @@ class TeamTest(Base):
         made = self.calls(['issue', 'create'])[-1]
         self.assertIn('ask owner', made)
         self.assertIn(f'programmer holds {REPO}#7, but its session (local_p) has been idle since 2026-01-02T11:50:00Z', self.body(made))
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'])
+        self.assertIn('back in the queue: its session (local_p)', self.body(self.calls(['issue', 'comment'])[-1]))
         self.run_tool('watch', '--once', now='2026-01-02T13:30:00Z')
         self.assertEqual(len(self.calls(['issue', 'create'])), 1)  # told once
         self.session('local_p', '2026-01-02T13:31:00Z')  # it woke up
@@ -358,6 +360,18 @@ class TeamTest(Base):
         out = self.run_tool('scale', 'programmer', '2').stdout
         self.assertNotIn('start a session', out)  # reused, nothing new
         self.assertIn('to session local_p2', self.run_tool('assign', '2', 'programmer').stdout)
+
+    def test_an_untouched_pull_request_becomes_a_task_once(self):
+        pr = {'number': 1, 'title': 'Accounts', 'updatedAt': '2025-12-20T10:00:00Z', 'url': 'https://x/pull/1', 'isDraft': False}
+        fresh = {'number': 2, 'title': 'New', 'updatedAt': '2026-01-02T10:00:00Z', 'url': 'https://x/pull/2', 'isDraft': False}
+        self.data({REPO: {'open': [], 'prs': [pr, fresh], 'next': 90}})
+        self.run_tool('watch', '--once')
+        made = self.calls(['issue', 'create'])
+        self.assertEqual(len(made), 1)
+        self.assertIn('PR #1 untouched for 3 days: finish it or close it', made[0])
+        self.assertEqual(made[0][made[0].index('--label') + 1], 'prog')
+        self.run_tool('watch', '--once', now='2026-01-02T14:00:00Z')
+        self.assertEqual(len(self.calls(['issue', 'create'])), 1)
 
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})

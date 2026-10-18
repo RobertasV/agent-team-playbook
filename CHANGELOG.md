@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.24 – 2026-10-18
+- A task whose session ignored the reminder goes back to the queue (working label removed, a comment says why) besides the owner's "needs you", so a free session takes it.
+- Open pull requests: checked hourly; one untouched for `stale_pr_days` (3) becomes a task for the default role – finish it or close it saying what replaced it. Once per stall.
+
 ## 0.2.23 – 2026-10-18
 - Plans name the target session by id only ("send this line to session local_…"); the dispatcher stopped doubting ids it remembered under another role's name.
 

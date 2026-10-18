@@ -37,6 +37,8 @@ elif args[:2] == ['issue', 'transfer']:
         print('cannot transfer between accounts', file=sys.stderr)
         sys.exit(1)
     print(f"https://github.com/{args[3]}/issues/{data.get(args[3], {}).get('next', 100)}")
+elif args[:2] == ['pr', 'list']:
+    print(json.dumps(repo.get('prs', [])))
 elif args[:2] == ['label', 'list']:
     print(json.dumps([{'name': n} for n in repo.get('labels', [])]))
 elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['issue', 'close'], ['label', 'create']):

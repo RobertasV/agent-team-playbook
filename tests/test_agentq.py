@@ -451,11 +451,11 @@ class TeamTest(Base):
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'])
         board[REPO]['open'][1]['labels'].append({'name': 'doing'})
         self.data(board)
-        self.assertIn(f'you hold {REPO}#8 – finish it first', self.run_tool('next', 'designer', '--as', 'codex-1').stdout)
+        self.assertIn(f'you hold {REPO}#8 (designer) – finish it first', self.run_tool('next', 'designer', '--as', 'codex-1').stdout)
         out = self.run_tool('assign', '7', 'designer').stdout
         self.assertIn('it takes its tasks itself (agentq next). Nothing to send.', out)
         self.data({REPO: {'open': []}})
-        self.assertIn('nothing for designer yet', self.run_tool('next', 'designer', '--wait', '--max-minutes', '0').stdout)
+        self.assertIn('nothing yet', self.run_tool('next', 'designer', '--wait', '--max-minutes', '0').stdout)
         self.run_tool('role', 'designer', '--agent', 'claude')
         self.assertIn('Stop this loop.', self.run_tool('next', 'designer', ok=False).stdout)
 
@@ -473,6 +473,16 @@ class TeamTest(Base):
         deleted = [c for c in self.calls() if c[:3] == ['api', '-X', 'DELETE']]
         self.assertEqual(deleted, [['api', '-X', 'DELETE', f'repos/{REPO}/issues/comments/1001']])
         self.assertNotIn(['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'], self.calls(['issue', 'edit']))
+
+    def test_one_worker_pulls_for_every_pulling_role(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.run_tool('role', 'programmer', '--agent', 'codex')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design']), issue(9, 'Crash', ['prog', 'priority'])],
+                          'labels': []},
+                   'api': {f'repos/{REPO}/issues/9': {'title': 'Crash', 'body': 'x', 'labels': [{'name': 'prog'}],
+                                                       'user': {'login': 'boss'}}}})
+        self.assertIn(f'{REPO}#9 is yours now (w1).', self.run_tool('next', '--as', 'w1').stdout)
 
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},

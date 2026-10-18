@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.40 – 2026-10-18
+- One Codex worker for the whole team: `agentq next --wait` without a role takes the next task of any pulling role (priority first).
+- Install in Codex as in Claude: one line, the same steps and questions; step 5 makes the roles pull, opens a Codex dispatcher task when there is no Claude one, and the installing task becomes the first worker ("Join the agent team in this project" adds more).
+
 ## 0.2.39 – 2026-10-18
 - Several dispatchers at once: `agentq team both` lets a Claude and a Codex dispatcher run side by side (one watcher lock each); the owner's words are forwarded only by the computer whose claim holds the task; a stale-PR task already on the board is not opened again; the full test suite runs only on `tests.host` when set.
 

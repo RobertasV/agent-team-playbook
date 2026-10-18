@@ -43,13 +43,9 @@ The owner never has to message the dispatcher. Never ask the dispatcher to stop 
 
 ## Codex and other agents
 
-A role can run outside the Claude desktop app (`agentq role <name> --agent codex`). Nobody sends it tasks; it pulls them:
-1. `agentq next <role> --wait --as <your name, e.g. codex-1>` – waits without tokens (up to 9 minutes; then run it again) and prints your task;
-2. do it and finish with the same commands as everyone (`agentq done` shows the owner's new words first if there are any);
-3. back to 1.
-Such a project points AGENTS.md at this skill (`agentq init --codex`).
+A role can run outside the Claude app (`agent: codex`): nobody sends it tasks, it pulls them. A Codex task works this loop: `agentq next [role] --wait --as <name>` (waits without tokens up to 9 minutes; without a role it takes the next task of any pulling role) → do it → finish with one command (`agentq done` shows the owner's new words first) → again. Told to "join the agent team" in a project that has it (`.agentq.json`), start that loop.
 
-The whole team can move: the owner says e.g. "the team goes to Codex" → `agentq team codex` and do what it prints (a Codex task in the dispatcher folder reads AGENTS.md there and loops on `agentq watch --max-minutes 9`; one Codex task per role worker loops on `agentq next`). The Claude dispatcher stops by itself at its next watch. Back: `agentq team claude`. Both at once (a Claude and a Codex dispatcher, each role on its own agent): `agentq team both`.
+The whole team: `agentq team codex` (all roles and the dispatcher), `agentq team claude`, or `agentq team both` (a Claude and a Codex dispatcher side by side, each role on its own agent).
 
 ## The owner's words
 
@@ -71,20 +67,27 @@ The whole team can move: the owner says e.g. "the team goes to Codex" → `agent
 - A release happens only after a check says GO and the owner says ship. Multi-agent reviews only when the owner asks.
 - Before each step ask: is it needed, is there a cheaper way, is someone already doing it?
 
-## Install (per project, by the programmer session, with the owner)
+## Install (per project, with the owner)
 
-Only when the owner asks for it in words in this project. A session never starts or re-runs the install on its own, not even when it sees the skill or config change.
+Only when the owner asks for it in words in this project – one line is enough, e.g. "Install the agent team from <package> in this project", in a Claude session or a Codex task. A session never starts or re-runs the install on its own, not even when it sees the skill or config change. The steps are the same for both; only step 5 differs.
 
-0. In the project: `<package>/tools/agentq init --owner <owner's login>` – this project's own config, the skill linked into this project only.
+0. In the project: `<package>/tools/agentq init --owner <owner's login>` (add `--codex` in Codex: AGENTS.md then points at this skill) – this project's own config, the skill linked into this project only.
 1. Check: `agentq setup` checks `gh`, the AI account signed in and active, Write access. Show the owner what is missing; only the owner signs in. Re-run until it passes.
 2. Labels: the passing `agentq setup` creates them (working, question, deferred, waiting, priority, blocking, hard, waits for owner's word, each role, each checker's `checked: <role>`), with the dispatcher folder.
 3. Sort the open issues: `agentq assign N <role> --queue` (label only), `agentq defer N "…"`. Unclear ones go to the owner as one list.
 4. Config: the roles table (`agentq roles`; change a role with `agentq role <name> …`).
-5. Sessions: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (mid model such as Sonnet, low effort, prompt "Read CLAUDE.md and start the loop"); every other session on the strongest model at `xhigh`; the dispatcher's folder is outside the project because a project subfolder would still load the project's CLAUDE.md and rules. Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
+5. Sessions – Claude: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (mid model such as Sonnet, low effort, prompt "Read CLAUDE.md and start the loop"); every other session on the strongest model at `xhigh`; the dispatcher's folder is outside the project because a project subfolder would still load the project's CLAUDE.md and rules. Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
    Then put every team session (yours included) into one sidebar group named after the project, e.g. "<project> team" in the config's language: reuse a group with that name or create it (`create_group`), then `move_sessions`. Record it: `agentq setup --group <group id>`, so a re-run puts recreated sessions into it.
+   Sessions – Codex: `agentq team codex` (or `agentq team both` when a Claude dispatcher runs or will run). The dispatcher, if there is no Claude one: a Codex task in the dispatcher folder with "Read AGENTS.md and start the loop" – open it with `codex-bridge new --draft --cwd <folder> --message "…"` where that tool exists (the owner presses Send), else ask the owner to open it. You become the first worker: after the install, start the loop above. More workers: more Codex tasks with "Join the agent team in this project".
 6. The dispatcher starts the watcher itself. Add an hourly health timer (launchd or cron): `<package>/tools/agentq --config <config> health` – no tokens; problems go to one issue for the owner.
-7. Ask: "Turn on the marketer?" Yes → start its session, `agentq role marketer --session <id>`. No → the programmer does marketing tasks.
-8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; start its session; record `--session`. If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no. Several sessions doing the same job are one role with a pool, never a second role per extra session.
+7. Ask: "Turn on the marketer?" Yes → `agentq role marketer`, then in Claude start its session and record `--session <id>` (in Codex it needs no session: a worker pulls its tasks). No → the programmer does marketing tasks.
+8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; in Claude start its session and record `--session` (in Codex nothing more). If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no. Several sessions doing the same job are one role with a pool, never a second role per extra session.
+
+9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
+
+Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
+
+Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".
 
 ## Test mode
 
@@ -93,8 +96,3 @@ The owner says which, in one word → `agentq tests per-task` or `agentq tests b
 ## How many work in parallel
 
 The owner says e.g. "10 programmers" → `agentq scale <role> 10` and do what it prints: start each missing session with the printed number in its title (the owner asked, so start them yourself), move it into the team's sidebar group, record it with `agentq role <role> --add-session <id>`. Fewer ("3 programmers") → `agentq scale <role> 3`: the rest get no new tasks and finish what they hold. Never archive or delete them: the next "more" reuses them first (unarchive one if the owner archived it).
-9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
-
-Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
-
-Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".

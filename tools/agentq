@@ -1143,41 +1143,62 @@ def claim(cfg, repo, number, text, who):
 
 
 def cmd_next(cfg, opts):
-    """Pull mode, for agents outside the desktop app (codex, …): take this role's next task and print its brief.
-    With --wait it waits without tokens until there is one (at most --max-minutes, then says to run it again)."""
-    role = role_by_name(cfg, opts.role)
-    if not pulls(role):
-        print(f"{role['role']} does not pull (agent: claude): the dispatcher sends its tasks. Stop this loop.")
-        return 1
-    worker = opts.who or role['role']
+    """Pull mode, for agents outside the desktop app (codex, …): take the next task and print its brief – of one role,
+    or, without a role, of any pulling role (one worker for the whole team). With --wait it waits without tokens until
+    there is one (at most --max-minutes, then says to run it again)."""
+    if opts.role:
+        roles = [role_by_name(cfg, opts.role)]
+        if not pulls(roles[0]):
+            print(f"{roles[0]['role']} does not pull (agent: claude): the dispatcher sends its tasks. Stop this loop.")
+            return 1
+    else:
+        roles = [r for r in cfg['roles'] if pulls(r)]
+        if not roles:
+            print('no role pulls its tasks (all are agent: claude) – run `agentq role <name> --agent codex` first.')
+            return 1
+    worker = opts.who or f"{socket.gethostname().split('.')[0]}-{opts.role or 'team'}"
     deadline = time.time() + 60 * opts.max_minutes
     while True:
         state = load_state(cfg)
         if not state.get('paused'):
+            holders = state.setdefault('holders', {})
             for repo in cfg['repos']:
                 issues = real_board(cfg, state, repo)
-                held = busy_with(cfg, issues, role)
-                holders = state.setdefault('holders', {})
-                mine = [i for i in held if holders.get(f"{repo}#{i['number']}") == worker]
-                if mine:
-                    ref = f"{repo}#{mine[0]['number']}"
-                    print(f'you hold {ref} – finish it first (agentq done / ask / route / wait); its task again:')
-                    cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
-                    return 0
-                if len(held) >= max(capacity(role), 1) and role['pool']:
-                    continue
-                ref, lost = None, []
-                issue = next_issue(cfg, issues, role)
-                while issue and not claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
-                    lost.append(issue['number'])  # another worker took it a moment earlier
-                    issue = next_issue(cfg, issues, role, lost)
-                if issue:
-                    ref = f"{repo}#{issue['number']}"
-                    relabel(repo, issue['number'], add=[cfg['labels']['working']])
-                elif role['mode'] == 'checker' and not held:
-                    items = unchecked(cfg, state, repo, role, {})[:20]
-                    if batch_ready(cfg, role, items, now()):
-                        ref = create_batch(cfg, state, repo, role, items)
+                candidates = []
+                for role in roles:
+                    held = busy_with(cfg, issues, role)
+                    mine = [i for i in held if holders.get(f"{repo}#{i['number']}") == worker]
+                    if mine:
+                        ref = f"{repo}#{mine[0]['number']}"
+                        print(f'you hold {ref} ({role["role"]}) – finish it first (agentq done / ask / route / wait); '
+                              f'its task again:')
+                        cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
+                        return 0
+                    if role['pool'] and len(held) >= capacity(role):
+                        continue
+                    picked = []
+                    while True:  # this role's queue, in its order
+                        issue = next_issue(cfg, issues, role, picked)
+                        if not issue:
+                            break
+                        picked.append(issue['number'])
+                        candidates.append((role, issue))
+                labels = cfg['labels']
+                candidates.sort(key=lambda c: (labels['priority'] not in labels_of(c[1]),
+                                               labels['blocking'] not in labels_of(c[1]), c[1]['number']))
+                ref = None
+                for role, issue in candidates:
+                    if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
+                        ref = f"{repo}#{issue['number']}"
+                        relabel(repo, issue['number'], add=[labels['working']])
+                        break  # a loser goes on to the next candidate: another worker took that one a moment earlier
+                if not ref:
+                    for role in roles:
+                        if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
+                            items = unchecked(cfg, state, repo, role, {})[:20]
+                            if batch_ready(cfg, role, items, now()):
+                                ref = create_batch(cfg, state, repo, role, items)
+                                break
                 if ref:
                     holders[ref] = worker
                     save_state(cfg, state)
@@ -1186,7 +1207,8 @@ def cmd_next(cfg, opts):
                     return 0
             save_state(cfg, state)
         if not opts.wait or time.time() >= deadline:
-            print(f"nothing for {role['role']} yet – run `agentq next {role['role']} --wait` again.")
+            again = f'agentq next {opts.role} --wait' if opts.role else 'agentq next --wait'
+            print(f"nothing yet – run `{again}` again.")
             return 0
         time.sleep(cfg['poll_seconds'])
 
@@ -2113,7 +2135,7 @@ def main(argv=None):
     wt.add_argument('--interval', type=float, help='seconds between polls (default: poll_seconds)')
     wt.add_argument('--max-minutes', type=float, help='give up after this long (an agent that waits in the foreground)')
     nx = sub.add_parser('next', help='pull mode (codex, …): take the role\'s next task and print its brief')
-    nx.add_argument('role')
+    nx.add_argument('role', nargs='?', help='one role; without it, any role that pulls (one worker for the team)')
     nx.add_argument('--wait', action='store_true', help='wait without tokens until there is one')
     nx.add_argument('--max-minutes', type=float, default=9, help='with --wait: give up after this long (default 9)')
     nx.add_argument('--as', dest='who', help='which worker of the role takes it (e.g. codex-1)')

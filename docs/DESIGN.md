@@ -22,6 +22,8 @@ The owner is not a role: everyone works for them.
 
 When a new role overlaps an existing one (e.g. designer and marketer both claim banners), setup asks the owner where the border is and records it as a teaching rule.
 
+A role may have several sessions (a pool, e.g. five programmers): one label, one queue, one task per session; `assign` records which session holds which task.
+
 ## Modes
 
 - **Programmer mode** – gets one task at a time carrying its role label, does it, closes it.

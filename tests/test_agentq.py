@@ -317,6 +317,31 @@ class TeamTest(Base):
                                                       now='2026-01-02T12:40:00Z').stdout)
         self.assertIn('ask owner', self.calls(['issue', 'create'])[-1])
 
+    def test_a_role_with_several_sessions_takes_one_task_per_session(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'programmer', '--sessions', 'local_p1,local_p2,local_p3')
+        self.data({REPO: {'open': [issue(1, 'A', ['prog', 'doing']), issue(2, 'B', ['prog']), issue(3, 'C', ['prog']),
+                                   issue(4, 'D', ['prog'])]}})
+        out = self.run_tool('watch', '--once').stdout
+        self.assertIn(f'assign {REPO}#2 programmer', out)
+        self.assertIn(f'assign {REPO}#3 programmer', out)
+        self.assertNotIn(f'assign {REPO}#4', out)
+        out = self.run_tool('assign', '2', 'programmer').stdout
+        self.assertIn(f'send the output of `agentq brief {REPO}#2` to programmer (local_p2)', out)  # #1 holds p1
+        self.data({REPO: {'open': [issue(1, 'A', ['prog', 'doing']), issue(2, 'B', ['prog', 'doing']),
+                                   issue(3, 'C', ['prog']), issue(4, 'D', ['prog'])]}})
+        self.assertIn('to programmer (local_p3)', self.run_tool('assign', '3', 'programmer').stdout)
+        self.data({REPO: {'open': [issue(1, 'A', ['prog', 'doing']), issue(2, 'B', ['prog', 'doing']),
+                                   issue(3, 'C', ['prog', 'doing']), issue(4, 'D', ['prog'])]}})
+        self.assertIn('queued', self.run_tool('assign', '4', 'programmer').stdout)
+        self.assertIn('local_p1, local_p2, local_p3', self.run_tool('role', 'programmer').stdout)
+        self.session('local_p2', '2026-01-02T11:00:00Z')
+        self.session('local_p1', '2026-01-02T11:59:00Z')
+        self.session('local_p3', '2026-01-02T11:59:00Z')
+        out = self.run_tool('watch', '--once').stdout
+        self.assertIn(f'programmer holds {REPO}#2 but has been quiet since 2026-01-02T11:00:00Z: send the output of '
+                      f'`agentq nudge {REPO}#2 --last 2026-01-02T11:00:00Z` to programmer (local_p2)', out)
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')

@@ -6,7 +6,7 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 
 - **You only write issues.** No labels, no states, no copying text between chats. Comment on an issue and your words reach the session working on it.
 - **Low token use while idle.** A script watches the board every minute and spends no tokens. The cheapest model (the dispatcher) wakes only when there is work, routes it and goes back to sleep.
-- **One task per role at a time.** Busy is read from the board, so a role never gets a second task while it works on one.
+- **One task per session at a time.** Busy is read from the board, so a session never gets a second task while it works on one. A role may have several sessions (e.g. five programmers); each free one gets the next task.
 - **Strong where it counts, cheap where it doesn't.** Every role works on the strongest model at extra-high effort (*hard* issues: the highest). Only the dispatcher, which just routes, runs on the cheapest.
 - **Checks in batches, not after every task.** A checker wakes after N finished tasks (or 24 h) and turns each problem into a new issue linked to the original.
 - **It learns where tasks belong.** When a session gets a task that isn't its own, routing it on teaches the dispatcher. Your rules always outrank the agents' rules.

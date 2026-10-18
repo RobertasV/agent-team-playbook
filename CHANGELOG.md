@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.20 – 2026-10-18
+- A role may have several sessions (`agentq role <name> --sessions a,b,c`): one label and queue, one task per session. The watcher plans as many tasks as there are free sessions; `assign` picks a free session and records it, so forwarded words, reminders and model or effort changes go to the session that holds the task.
+
 ## 0.2.19 – 2026-10-18
 - The dispatcher's CLAUDE.md: read the ended watcher's output file first, every time; never assume what it says or that a watcher still runs.
 

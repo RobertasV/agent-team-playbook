@@ -192,6 +192,8 @@ def role_entry(raw):
             'release_model': '', 'effort': '', 'hard_effort': '', 'session': '', 'description': '', 'examples': [],
             'shots': [], **raw}
     role.setdefault('merge', role['mode'] == 'programmer')
+    role['sessions'] = [x for x in (raw.get('sessions') or [raw.get('session')]) if x]  # several sessions: a pool
+    role['session'] = role['sessions'][0] if role['sessions'] else ''
     if role['mode'] not in MODES:
         raise Fail(f'role {role["role"]}: mode must be one of {", ".join(MODES)}')
     return role
@@ -293,9 +295,27 @@ def checked_label(cfg, role):
     return cfg['labels']['checked'].format(role=role['role'])
 
 
-def session_of(role):
+def session_of(role, sid=None):
     """A role session as plans name it: the role, then its id – never the dispatcher's own."""
-    return f"{role['role']} ({role['session'] or 'no session id in the config – run setup'})"
+    return f"{role['role']} ({sid or role['session'] or 'no session id in the config – run setup'})"
+
+
+def capacity(role):
+    return max(1, len(role['sessions']))
+
+
+def holder_of(state, role, ref):
+    """The session of a role's pool that holds this task (recorded by assign); else the role's first session."""
+    sid = state.get('holders', {}).get(ref)
+    return sid if sid in role['sessions'] else role['session']
+
+
+def free_session(state, role, held_refs):
+    holders = state.get('holders', {})
+    taken = {holders.get(r) for r in held_refs if holders.get(r) in role['sessions']}
+    unknown = sum(1 for r in held_refs if holders.get(r) not in role['sessions'])
+    free = [x for x in role['sessions'] if x not in taken][unknown:]
+    return free[0] if free else role['session']
 
 
 # ---------- GitHub helpers ----------
@@ -512,10 +532,11 @@ def busy_with(cfg, issues, role, but=None):
     return [i for i in issues if i['number'] != but and role['label'] in labels_of(i) and working in labels_of(i)]
 
 
-def next_issue(cfg, issues, role):
+def next_issue(cfg, issues, role, skip_numbers=()):
     """Priority label → blocking label → oldest."""
     skip = cfg['skip'] | {cfg['labels']['working'], cfg['labels']['batch']}
-    queue = [i for i in issues if role['label'] in labels_of(i) and not skip & set(labels_of(i)) and trusted(cfg, i)]
+    queue = [i for i in issues if role['label'] in labels_of(i) and not skip & set(labels_of(i)) and trusted(cfg, i)
+             and i['number'] not in skip_numbers]
     queue.sort(key=lambda i: (cfg['labels']['priority'] not in labels_of(i),
                               cfg['labels']['blocking'] not in labels_of(i), i['number']))
     return queue[0] if queue else None
@@ -659,14 +680,15 @@ def check_held(cfg, state, repo, issues, start, plan):
         for issue in busy_with(cfg, issues, role):
             ref = f"{repo}#{issue['number']}"
             held.add(ref)
-            if not role['session']:
+            sid = holder_of(state, role, ref)
+            if not sid:
                 continue
-            last = session_activity(cfg, role['session'])
+            last = session_activity(cfg, sid)
             if last is None:
                 every = dt.timedelta(minutes=cfg['check_minutes'])
                 if cfg['check_minutes'] and start - parse_time(issue['updatedAt']) >= idle and (
                         ref not in checks or start - parse_time(checks[ref]) >= every):
-                    plan.append(('held', ref, role, issue['title'], None))
+                    plan.append(('held', ref, role, issue['title'], None, sid))
                     checks[ref] = iso(start)
                 continue
             nudge = nudges.get(ref)
@@ -677,13 +699,13 @@ def check_held(cfg, state, repo, issues, start, plan):
                 continue
             if nudge is None:
                 nudges[ref] = {'at': iso(start)}
-                plan.append(('nudge', ref, role, issue['title'], iso(last)))
+                plan.append(('nudge', ref, role, issue['title'], iso(last), sid))
             elif not nudge.get('told') and start - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']):
-                problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=role['session'],
+                problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=sid,
                                                           last=iso(last), at=nudge['at'])
                 report_health(cfg, state, [problem], needs_owner=True, close=False)
                 nudge['told'] = iso(start)
-    for table in (nudges, checks):
+    for table in (nudges, checks, state.setdefault('holders', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
 
@@ -733,17 +755,23 @@ def build_plan(cfg, state, start):
                 plan.append(('answered', ref, role, item['title'], None))
                 taken.add(role['role'])
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
-                plan.append(('forward', ref, role or default_role(cfg), item['title'], min(times)))
+                role = role or default_role(cfg)
+                plan.append(('forward', ref, role, item['title'], min(times), holder_of(state, role, ref)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
         cache = {}
         for role in cfg['roles']:
-            if role['role'] in taken or busy_with(cfg, issues, role):
-                continue
-            issue = next_issue(cfg, issues, role)
-            if issue:
+            slots = capacity(role) - len(busy_with(cfg, issues, role)) - (role['role'] in taken)
+            picked = []
+            while slots > 0:
+                issue = next_issue(cfg, issues, role, picked)
+                if not issue:
+                    break
+                picked.append(issue['number'])
                 plan.append(('assign', f"{repo}#{issue['number']}", role, issue['title'], None))
-            elif role['mode'] == 'checker' and batch_ready(cfg, role, unchecked(cfg, state, repo, role, cache), start):
+                slots -= 1
+            if slots > 0 and role['mode'] == 'checker' and not busy_with(cfg, issues, role) and \
+                    batch_ready(cfg, role, unchecked(cfg, state, repo, role, cache), start):
                 plan.append(('batch', repo, role, None, None))
         skip = cfg['skip'] | {labels['working'], labels['batch']}
         loose = [i for i in sorted(issues, key=lambda i: i['number'])
@@ -757,19 +785,20 @@ def render_plan(cfg, plan, start):
     q = 'agentq'
     lines = [f'agentq plan {iso(start)} – do every step in order, without asking anyone. The session ids come from '
              f'the config and are current, even when they differ from ids you saw before (the owner may replace a session).']
-    for n, (kind, ref, role, title, since) in enumerate(plan, 1):
+    for n, (kind, ref, role, title, since, *rest) in enumerate(plan, 1):
+        sid = rest[0] if rest else None
         if kind == 'forward':
             lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send the output of '
-                         f'`{q} brief {ref} --since {since}` to {session_of(role)}.')
+                         f'`{q} brief {ref} --since {since}` to {session_of(role, sid)}.')
         elif kind == 'answered':
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
             lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'nudge':
             lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send the output of '
-                         f'`{q} nudge {ref} --last {since}` to {session_of(role)}.')
+                         f'`{q} nudge {ref} --last {since}` to {session_of(role, sid)}.')
         elif kind == 'held':
-            lines.append(f'{n}. {role["role"]} holds {ref}: call get_session for {role["session"]}, then run '
+            lines.append(f'{n}. {role["role"]} holds {ref}: call get_session for {sid or role["session"]}, then run '
                          f'`{q} held {ref} --running <its isRunning> --last <its lastActivityAt>` and do what it prints.')
         elif kind == 'batch':
             lines.append(f'{n}. a batch is ready for {role["role"]}: run `{q} batch {role["role"]} -R {ref}` '
@@ -847,25 +876,26 @@ def cmd_watch(cfg, opts):
 
 # ---------- dispatcher commands ----------
 
-def session_settings(cfg, state, role, issue_labels, batch):
+def session_settings(cfg, state, role, issue_labels, batch, sid=None):
     """The model and effort this task needs; a line for each that differs from what was last set."""
     want = {'model': role['model'], 'effort': role['effort']}
     if role['mode'] == 'checker' and not batch and role['release_model']:
         want['model'] = role['release_model']
     if cfg['labels']['hard'] in issue_labels and role['hard_effort']:
         want['effort'] = role['hard_effort']
-    last = state.setdefault('sessions', {}).setdefault(role['role'], {})
+    sid = sid or role['session']
+    last = state.setdefault('sessions', {}).setdefault(sid or role['role'], {})
     lines = []
     for key, tool in (('model', 'set_session_model'), ('effort', 'set_session_effort')):
         if want[key] and want[key] != last.get(key):
-            lines.append(f'{tool} for {session_of(role)}: {want[key]}')
+            lines.append(f'{tool} for {session_of(role, sid)}: {want[key]}')
             last[key] = want[key]
     return lines
 
 
-def print_send(cfg, state, role, ref, issue_labels, batch=False):
-    steps = session_settings(cfg, state, role, issue_labels, batch)
-    steps.append(f'send the output of `agentq brief {ref}` to {session_of(role)}')
+def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
+    steps = session_settings(cfg, state, role, issue_labels, batch, sid)
+    steps.append(f'send the output of `agentq brief {ref}` to {session_of(role, sid)}')
     for n, step in enumerate(steps, 1):
         print(f'{n}. {step}')
 
@@ -886,15 +916,17 @@ def cmd_assign(cfg, opts):
     state = load_state(cfg)
     busy = busy_with(cfg, real_board(cfg, state, repo), role, but=number)
     who = cfg['dispatcher']['name']
-    if busy:
+    if len(busy) >= capacity(role):
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, queued ({role['role']} works on #{busy[0]['number']}). Nothing to send.")
         return
     comment(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who)
     relabel(repo, number, add=[role['label'], labels['working']], remove=remove)
+    sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy])
+    state.setdefault('holders', {})[ref] = sid
     print(f"{ref} → {role['role']}, working. Now:")
-    print_send(cfg, state, role, ref, names, batch=labels['batch'] in names)
+    print_send(cfg, state, role, ref, names, batch=labels['batch'] in names, sid=sid)
     save_state(cfg, state)
 
 
@@ -1362,10 +1394,10 @@ def cmd_held(cfg, opts):
         nudges[ref] = {'at': iso(moment)}
         save_state(cfg, state)
         print(f"{role['role']} holds {ref} but has been idle since {iso(last)}. Now:")
-        print(f'1. send the output of `agentq nudge {ref} --last {iso(last)}` to {session_of(role)}')
+        print(f'1. send the output of `agentq nudge {ref} --last {iso(last)}` to {session_of(role, holder_of(state, role, ref))}')
         return
     if moment - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']) and not nudge.get('told'):
-        problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=role['session'] or '-',
+        problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=holder_of(state, role, ref) or '-',
                                                   last=iso(last), at=nudge['at'])
         where = report_health(cfg, state, [problem], needs_owner=True, close=False)
         nudge['told'] = iso(moment)
@@ -1558,7 +1590,7 @@ def print_roles_table(cfg):
     for r in cfg['roles']:
         n = f"{r['n']}/{float(r['hours']):g}h" if r['mode'] == 'checker' else '-'
         print(f"{r['role']} | {r['label']} | {r['mode']} | {n} | {','.join(r['paths']) or '-'} | {r['model'] or '-'} | "
-              f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {r['session'] or 'MISSING'}")
+              f"{r['effort'] or '-'} | {'yes' if r['merge'] else 'no'} | {', '.join(r['sessions']) or 'MISSING'}")
     d = cfg['dispatcher']
     print(f"dispatcher | - | - | - | - | {d.get('model') or '-'} | {d.get('effort') or '-'} | - | "
           f"{d['session'] or 'MISSING'} | folder {d['folder'] or '-'}")
@@ -1589,6 +1621,11 @@ def cmd_role(cfg, opts):
                     'description'):
             if getattr(opts, key) is not None:
                 entry[key] = getattr(opts, key)
+        if opts.sessions is not None:
+            entry['sessions'] = [x.strip() for x in opts.sessions.split(',') if x.strip()]
+            entry['session'] = entry['sessions'][0] if entry['sessions'] else ''
+        elif opts.session is not None:
+            entry.pop('sessions', None)
         if opts.paths is not None:
             entry['paths'] = [p.strip() for p in opts.paths.split(',') if p.strip()]
         if opts.example:
@@ -1714,6 +1751,7 @@ def main(argv=None):
     ro.add_argument('--hard-effort', choices=EFFORTS)
     ro.add_argument('--merge', choices=('yes', 'no'))
     ro.add_argument('--session')
+    ro.add_argument('--sessions', help='several sessions for one role (a pool), comma-separated')
     ro.add_argument('--description')
     ro.add_argument('--example', action='append', help='an example task (repeat for 2–3)')
     ro.add_argument('--shot', action='append', help='a reference screenshot, copied into the dispatcher\'s examples/')

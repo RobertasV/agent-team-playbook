@@ -41,6 +41,10 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 - The Claude desktop app (Code tab). Sessions message each other, and a finished background command wakes a session.
 - A separate GitHub account for the agents (the "AI account"). GitHub allows one free machine account per person. Invite it to your project with **Write** access, not Admin.
 
+## Codex and other agents
+
+A role may run in Codex or another agent instead of a Claude session: `agentq role <name> --agent codex`. The dispatcher then sends it nothing; the agent loops on `agentq next <role> --wait` (waits without tokens, prints the next task), does the task and finishes it with the usual commands. `agentq init --codex` points the project's AGENTS.md at the skill. Reminders for quiet sessions and per-task model switches are Claude-only; the hourly health check still reports a task that stops moving.
+
 ## Install into a project
 
 Do this once per project. The team is never installed globally.

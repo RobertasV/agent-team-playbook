@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.34 – 2026-10-18
+- Codex and other agents: a role with `agent: codex` pulls its tasks with `agentq next <role> --wait [--as name]` (waits without tokens, takes the next task or its checker batch, prints the brief); the watcher plans nothing for it and `assign` only queues. `agentq init --codex` points AGENTS.md at the skill.
+- `agentq done` first shows the owner's words written after the last agent comment that no brief delivered, and closes only on the next run.
+
 ## 0.2.33 – 2026-10-18
 - Plain `agentq` shows its commands instead of an error.
 

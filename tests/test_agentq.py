@@ -436,6 +436,38 @@ class TeamTest(Base):
                                                        'user': {'login': 'boss'}}}})
         self.assertIn('The full suite runs on its own every 2 tasks.', self.run_tool('brief', '5').stdout)
 
+    def test_a_codex_role_pulls_its_own_tasks(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        board = {REPO: {'open': [issue(7, 'Icon', ['design']), issue(8, 'Logo', ['design', 'priority'])]},
+                 'api': {f'repos/{REPO}/issues/8': {'title': 'Logo', 'body': 'make it round', 'labels': [{'name': 'design'}],
+                                                     'user': {'login': 'boss'}}}}
+        self.data(board)
+        self.assertNotIn('designer', self.run_tool('watch', '--once').stdout)  # nobody sends it anything
+        out = self.run_tool('next', 'designer', '--as', 'codex-1').stdout
+        self.assertIn(f'{REPO}#8 is yours now (codex-1).', out)
+        self.assertIn('make it round', out)
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'])
+        board[REPO]['open'][1]['labels'].append({'name': 'doing'})
+        self.data(board)
+        self.assertIn(f'you hold {REPO}#8 – finish it first', self.run_tool('next', 'designer', '--as', 'codex-1').stdout)
+        out = self.run_tool('assign', '7', 'designer').stdout
+        self.assertIn('it takes its tasks itself (agentq next). Nothing to send.', out)
+        self.data({REPO: {'open': []}})
+        self.assertIn('nothing for designer yet', self.run_tool('next', 'designer', '--wait', '--max-minutes', '0').stdout)
+
+    def test_done_shows_the_owners_new_words_before_closing(self):
+        self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},
+                   'api': {f'repos/{REPO}/issues/7/comments': [
+                       {'user': {'login': 'bot'}, 'body': '🤖 dispatcher: → programmer.', 'created_at': '2026-01-02T10:00:00Z'},
+                       {'user': {'login': 'boss'}, 'body': 'also the footer', 'created_at': '2026-01-02T11:00:00Z'}]}})
+        run = self.run_tool('done', '7', 'fixed', ok=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('also the footer', run.stdout)
+        self.assertEqual(self.calls(['issue', 'close']), [])
+        self.run_tool('done', '7', 'fixed, footer too')  # the words are delivered now
+        self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '7', '-R', REPO])
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')
@@ -832,6 +864,11 @@ class InitTest(Base):
         self.assertEqual(os.path.realpath(os.path.join(project, '.agentq.json')), os.path.realpath(config))
         self.assertEqual(os.path.realpath(os.path.join(project, '.claude', 'skills', 'agent-team')),
                          os.path.join(ROOT, 'skill', 'agent-team'))
+        run = subprocess.run([sys.executable, TOOL, 'init', '--owner', 'boss', '--project', project, '--codex'],
+                             capture_output=True, text=True, env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        agents = open(os.path.join(project, 'AGENTS.md')).read()
+        self.assertIn('skill/agent-team/SKILL.md', agents)
         exclude = open(os.path.join(project, '.git', 'info', 'exclude')).read().splitlines()
         self.assertEqual(exclude.count('.agentq.json'), 1)
         self.assertEqual(exclude.count('.claude/skills/agent-team'), 1)

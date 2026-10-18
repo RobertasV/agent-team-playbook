@@ -41,6 +41,14 @@ The owner stops or starts the team with one word to any team session:
 - "go" → `agentq resume`; when it says the watcher is not running, send the dispatcher it names "Start the watcher" yourself.
 The owner never has to message the dispatcher. Never ask the dispatcher to stop its watcher.
 
+## Codex and other agents
+
+A role can run outside the Claude desktop app (`agentq role <name> --agent codex`). Nobody sends it tasks; it pulls them:
+1. `agentq next <role> --wait --as <your name, e.g. codex-1>` – waits without tokens (up to 9 minutes; then run it again) and prints your task;
+2. do it and finish with the same commands as everyone (`agentq done` shows the owner's new words first if there are any);
+3. back to 1.
+Such a project points AGENTS.md at this skill (`agentq init --codex`).
+
 ## The owner's words
 
 - A question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.

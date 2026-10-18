@@ -224,6 +224,7 @@ def role_entry(raw):
             'release_model': '', 'effort': '', 'hard_effort': '', 'session': '', 'description': '', 'examples': [],
             'shots': [], **raw}
     role.setdefault('merge', role['mode'] == 'programmer')
+    role.setdefault('agent', 'claude')  # another agent (codex, …) pulls its tasks with `agentq next`
     role['sessions'] = [x for x in (raw.get('sessions') or [raw.get('session')]) if x]  # several sessions: a pool
     active = raw.get('active')
     role['pool'] = role['sessions'][:active] if active is not None else role['sessions']  # the rest rest, kept
@@ -347,6 +348,10 @@ def session_of(role, sid=None):
         return f"session (none in the config for {role['role']} – run setup)"
     seen = glob.glob(os.path.join(glob.escape(APP_SESSIONS), '*', '*', f'{glob.escape(sid)}.json'))
     return f"session {sid}" + (' (agentq checked: it exists)' if seen else '')
+
+
+def pulls(role):
+    return role.get('agent', 'claude') != 'claude'
 
 
 def capacity(role):
@@ -729,6 +734,8 @@ def check_held(cfg, state, repo, issues, start, plan):
         for issue in busy_with(cfg, issues, role):
             ref = f"{repo}#{issue['number']}"
             held.add(ref)
+            if pulls(role):
+                continue  # no desktop-app session to watch; health reports a task that stops moving
             sid = holder_of(state, role, ref)
             if not sid:
                 continue
@@ -895,6 +902,8 @@ def build_plan(cfg, state, start):
                 taken.add(role['role'])
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 role = role or default_role(cfg)
+                if pulls(role):
+                    continue  # it reads new words when it runs `agentq done`
                 plan.append(('forward', ref, role, item['title'], min(times), holder_of(state, role, ref)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
@@ -902,6 +911,8 @@ def build_plan(cfg, state, start):
         check_tests(cfg, state, repo, start, plan)
         cache = {}
         for role in cfg['roles']:
+            if pulls(role):
+                continue  # it takes its own tasks with `agentq next`
             slots = capacity(role) - len(busy_with(cfg, issues, role)) - (role['role'] in taken)
             picked = []
             while slots > 0:
@@ -1051,6 +1062,50 @@ def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
         print(f'{n}. {step}')
 
 
+def cmd_next(cfg, opts):
+    """Pull mode, for agents outside the desktop app (codex, …): take this role's next task and print its brief.
+    With --wait it waits without tokens until there is one (at most --max-minutes, then says to run it again)."""
+    role = role_by_name(cfg, opts.role)
+    worker = opts.who or role['role']
+    deadline = time.time() + 60 * opts.max_minutes
+    while True:
+        state = load_state(cfg)
+        if not state.get('paused'):
+            for repo in cfg['repos']:
+                issues = real_board(cfg, state, repo)
+                held = busy_with(cfg, issues, role)
+                holders = state.setdefault('holders', {})
+                mine = [i for i in held if holders.get(f"{repo}#{i['number']}") == worker]
+                if mine:
+                    ref = f"{repo}#{mine[0]['number']}"
+                    print(f'you hold {ref} – finish it first (agentq done / ask / route / wait); its task again:')
+                    cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
+                    return 0
+                if len(held) >= max(capacity(role), 1) and role['pool']:
+                    continue
+                issue = next_issue(cfg, issues, role)
+                ref = None
+                if issue:
+                    ref = f"{repo}#{issue['number']}"
+                    comment(cfg, repo, issue['number'], cfg['texts']['take'], role['role'])
+                    relabel(repo, issue['number'], add=[cfg['labels']['working']])
+                elif role['mode'] == 'checker' and not held:
+                    items = unchecked(cfg, state, repo, role, {})[:20]
+                    if batch_ready(cfg, role, items, now()):
+                        ref = create_batch(cfg, state, repo, role, items)
+                if ref:
+                    holders[ref] = worker
+                    save_state(cfg, state)
+                    print(f'{ref} is yours now ({worker}).')
+                    cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
+                    return 0
+            save_state(cfg, state)
+        if not opts.wait or time.time() >= deadline:
+            print(f"nothing for {role['role']} yet – run `agentq next {role['role']} --wait` again.")
+            return 0
+        time.sleep(cfg['poll_seconds'])
+
+
 def cmd_assign(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
     role = role_by_name(cfg, opts.role)
@@ -1065,8 +1120,13 @@ def cmd_assign(cfg, opts):
         return
     remove += [n for n in {labels['question'], labels['owner_word']} if n in names]  # the owner answered
     state = load_state(cfg)
-    busy = busy_with(cfg, real_board(cfg, state, repo), role, but=number)
     who = cfg['dispatcher']['name']
+    if pulls(role):
+        comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
+        relabel(repo, number, add=[role['label']], remove=remove)
+        print(f"{ref} → {role['role']}, in its queue; it takes its tasks itself (agentq next). Nothing to send.")
+        return
+    busy = busy_with(cfg, real_board(cfg, state, repo), role, but=number)
     if len(busy) >= capacity(role):
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
@@ -1405,9 +1465,25 @@ def cmd_roles(cfg, opts):
 
 # ---------- finishing ----------
 
+def unread_words(cfg, repo, number):
+    """The owner's comments written after the last agent comment that no brief has delivered."""
+    comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
+    last_agent = max([c['created_at'] for c in comments if login_of(c) == cfg['agent_account']] or [''])
+    delivered = (load_delivered(cfg) or {}).get(repo, {})
+    return [c for c in comments if login_of(c) in set(cfg['owner_accounts']) and c['created_at'] > last_agent
+            and comment_key(c) not in delivered]
+
+
 def cmd_done(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
     issue = view(repo, number)
+    unread = unread_words(cfg, repo, number)
+    if unread:
+        mark_delivered(cfg, repo, unread, cfg['forward_hours'])
+        print(f'not closed: the owner wrote on {repo}#{number} while you worked – act on it, then run done again:')
+        for c in unread:
+            print(f"--- the owner ({login_of(c)}), {c['created_at']} ---\n{(c.get('body') or '').strip()}")
+        return 1
     comment(cfg, repo, number, cfg['texts']['done'].format(text=opts.text), holder(cfg, issue))
     if cfg['labels']['working'] in labels_of(issue):
         relabel(repo, number, remove=[cfg['labels']['working']])
@@ -1434,6 +1510,14 @@ def cmd_batch(cfg, opts):
     if not opts.now and not batch_ready(cfg, role, items, now()):
         print(f'not ready: {len(items)} of {role["n"]}, the oldest closed {items[0]["closedAt"]} (--now to check anyway)')
         return
+    ref = create_batch(cfg, state, repo, role, items)
+    refs = ' '.join(f"#{i['number']}" for i in items)
+    print(f"{ref} created: {role['role']} checks {refs}. Now:")
+    print_send(cfg, state, role, ref, [], batch=True)
+    save_state(cfg, state)
+
+
+def create_batch(cfg, state, repo, role, items):
     refs = ' '.join(f"#{i['number']}" for i in items)
     commit = git(cfg['checkout'], 'rev-parse', 'HEAD').strip() if cfg.get('checkout') else 'not pinned (no checkout in the config)'
     body = cfg['texts']['batch_body'].format(role=role['role'], commit=commit,
@@ -1445,10 +1529,7 @@ def cmd_batch(cfg, opts):
     mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items]})
     number = create_issue(repo, cfg['texts']['batch_title'].format(refs=refs), f'{body}\n\n<!-- agentq:batch {mark} -->',
                           [role['label'], cfg['labels']['batch'], cfg['labels']['working']])
-    ref = f'{repo}#{number}'
-    print(f"{ref} created: {role['role']} checks {refs}. Now:")
-    print_send(cfg, state, role, ref, [], batch=True)
-    save_state(cfg, state)
+    return f'{repo}#{number}'
 
 
 def cmd_checked(cfg, opts):
@@ -1688,6 +1769,14 @@ def cmd_init(opts):
     if link(os.path.join(PACKAGE, 'skill', 'agent-team'), os.path.join(top, skill)):
         print(f'{top}/{skill} → the skill')
     exclude_locally(top, PROJECT_CONFIG, skill)
+    if opts.codex:
+        line = f"Team rules and the task queue: read `{os.path.join(PACKAGE, 'skill', 'agent-team', 'SKILL.md')}`."
+        agents = os.path.join(top, 'AGENTS.md')
+        text = open(agents, encoding='utf-8').read() if os.path.exists(agents) else ''
+        if line not in text:
+            with open(agents, 'a', encoding='utf-8') as f:
+                f.write(('\n' if text and not text.endswith('\n') else '') + line + '\n')
+            print(f'{agents}: the skill line added (for codex and other agents that read AGENTS.md)')
     print(f'installed in {top} only. Next: agentq setup (from the project folder).')
 
 
@@ -1838,7 +1927,7 @@ def cmd_role(cfg, opts):
             entry = {'role': name, **copy.deepcopy(PRESETS.get(name.lower(), {}))}
             roles.append(entry)
         for key in ('label', 'mode', 'n', 'hours', 'model', 'release_model', 'effort', 'hard_effort', 'session',
-                    'description'):
+                    'description', 'agent'):
             if getattr(opts, key) is not None:
                 entry[key] = getattr(opts, key)
         if opts.add_session:
@@ -1915,6 +2004,11 @@ def main(argv=None):
     wt = sub.add_parser('watch', help='poll the board every minute; print a plan and exit when there is work')
     wt.add_argument('--once', action='store_true', help='poll once')
     wt.add_argument('--interval', type=float, help='seconds between polls (default: poll_seconds)')
+    nx = sub.add_parser('next', help='pull mode (codex, …): take the role\'s next task and print its brief')
+    nx.add_argument('role')
+    nx.add_argument('--wait', action='store_true', help='wait without tokens until there is one')
+    nx.add_argument('--max-minutes', type=float, default=9, help='with --wait: give up after this long (default 9)')
+    nx.add_argument('--as', dest='who', help='which worker of the role takes it (e.g. codex-1)')
     s = sub.add_parser('assign', help='give an issue to a role (working if the role is free, else queued)')
     s.add_argument('issue')
     s.add_argument('role')
@@ -1980,6 +2074,7 @@ def main(argv=None):
     ro.add_argument('name')
     ro.add_argument('--label')
     ro.add_argument('--mode', choices=MODES)
+    ro.add_argument('--agent', help='claude (the dispatcher sends tasks) or another agent such as codex (it pulls them)')
     ro.add_argument('--n', type=int)
     ro.add_argument('--hours', type=number)
     ro.add_argument('--paths', help='comma-separated path prefixes or globs (checker mode)')
@@ -2004,6 +2099,7 @@ def main(argv=None):
     ini.add_argument('--owner', action='append', required=True, help="the owner's GitHub login (repeat for more)")
     ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
     ini.add_argument('--project', help='the project folder (default: here)')
+    ini.add_argument('--codex', action='store_true', help='also point AGENTS.md at the skill (codex and other agents)')
     opts = p.parse_args(argv)
     if not opts.cmd:  # plain `agentq`: what it can do
         p.print_help()
@@ -2019,7 +2115,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

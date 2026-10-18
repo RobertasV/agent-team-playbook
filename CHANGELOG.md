@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.45 – 2026-10-18
+- A Codex task never waits in a command: Codex checks a running command with a model call every minute (one worker waiting 45 minutes cost 17M input tokens). A Codex worker with no task ends its turn; the watcher claims its next task and queues one message for it (`codex queue`; an unloaded task is opened in the background). Reminders for a quiet Codex worker go the same way. A Codex dispatcher's watcher runs on its own and sends each plan as a message.
+- Claude sessions and Codex workers waiting for the same role take turns.
+- The watcher and `agentq next --wait` carry on in a new agentq version without waking anyone.
+- The state file is saved with a three-way merge under a lock, so concurrent writers no longer drop each other's changes (a worker's task, the owner's pause).
+
 ## 0.2.44 – 2026-10-18
 - Every worker pulls: a Claude session runs `agentq next <role> --wait` in the background after each task and is woken with the next one; the dispatcher sends tasks only to sessions that are not waiting, so it wakes far less (the owner's rule: no more requests than one session doing everything). Waiting workers use the watcher's board snapshot; a worker's own held task is checked on GitHub.
 - Team labels: a task gets `claude` or `codex` when taken; comments say which team wrote them; `agentq stats` compares the teams (tasks, hours from taking to closing, problems found later).

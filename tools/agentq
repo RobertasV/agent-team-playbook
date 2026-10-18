@@ -110,8 +110,14 @@ DEFAULT_TEXTS = {
     'split': 'the part for {repo} is {other}.',
     'split_from': 'Split from {ref}.',
     'after': ('Never message other sessions and never offer to take part of a task someone else holds: the board '
-              'carries everything. When you have finished, get your next task with `agentq next {role} --wait` '
-              '(Claude: with run_in_background – it wakes you; Codex: in the foreground with --max-minutes 55).'),
+              'carries everything. When you have finished, get your next task with `agentq next {role}` – in Claude '
+              'add --wait and run it with run_in_background (it wakes you when there is one); in Codex run it as it is, '
+              'and when it says there is none, end your turn (a message wakes you).'),
+    'codex_idle': ('No task now. End your turn here: do not wait, poll or run anything else – in Codex a waiting '
+                   'command costs a model call every minute. agentq sends this task a message when there is work.'),
+    'wake_task': ('Task {ref} for {role} is yours now (worker {worker}): run `{agentq} brief {ref}` and act on it. '
+                  'Finish it with one command, then run `{next}`.'),
+    'codex_unreached': 'back in the queue: its Codex worker ({worker}) could not be reached ({error}).',
     'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new task that links '
                      'the original (`agentq open <role> "title" "From the check of #N: …"`); never reopen the original.\n'
                      'Finish with: `agentq checked {ref} "short summary"`'),
@@ -307,19 +313,75 @@ def save_config(cfg, change):
     return load_config(cfg['_path'])
 
 
-def load_state(cfg):
+BASE = '_loaded'  # the state as a command loaded it, so its save keeps what others changed meanwhile
+
+
+class state_lock:
+    """Several processes write the state (the watcher, workers, the dispatcher's commands): one at a time."""
+    def __init__(self, cfg):
+        self.path = cfg['state_file'] + '.lock'
+
+    def __enter__(self):
+        self.handle = open(self.path, 'a')
+        fcntl.flock(self.handle, fcntl.LOCK_EX)
+
+    def __exit__(self, *exc):
+        self.handle.close()
+
+
+def read_state_file(cfg):
     try:
         with open(cfg['state_file'], encoding='utf-8') as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, ValueError):
         return {}
 
 
-def save_state(cfg, state):
+def write_state_file(cfg, data):
     tmp = cfg['state_file'] + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2)
+        json.dump(data, f, indent=2)
     os.replace(tmp, cfg['state_file'])
+
+
+def load_state(cfg):
+    state = read_state_file(cfg)
+    state[BASE] = copy.deepcopy(state)
+    return state
+
+
+def merged(base, ours, disk):
+    """Three-way, key by key: what this command changed since it loaded the state wins; what others changed
+    meanwhile (a worker took a task, the owner paused the team) stays."""
+    out = dict(disk)
+    for key in set(base) | set(ours):
+        if key not in ours:
+            out.pop(key, None)
+        elif key not in base or ours[key] != base[key]:
+            if all(isinstance(x, dict) for x in (base.get(key), ours[key], disk.get(key))):
+                out[key] = merged(base[key], ours[key], disk[key])
+            else:
+                out[key] = ours[key]
+    return out
+
+
+def save_state(cfg, state):
+    ours = {k: v for k, v in state.items() if k != BASE}
+    with state_lock(cfg):
+        new = merged(state[BASE], ours, read_state_file(cfg)) if BASE in state else ours
+        write_state_file(cfg, new)
+    state.clear()
+    state.update(new)
+    state[BASE] = copy.deepcopy(new)
+
+
+def update_state(cfg, change):
+    """Read, change and write the state in one locked step; returns what change returns."""
+    with state_lock(cfg):
+        data = read_state_file(cfg)
+        result = change(data)
+        write_state_file(cfg, data)
+    return result
 
 
 # ---------- roles ----------
@@ -436,8 +498,8 @@ def view(repo, number):
     return gh_json('issue', 'view', str(number), '-R', repo, '--json', 'number,title,body,labels,state,author')
 
 
-def comment(cfg, repo, number, text, who=None):
-    agent = running_in()
+def comment(cfg, repo, number, text, who=None, agent=None):
+    agent = agent or running_in()
     body = f"🤖 {who or cfg['role']}{' · ' + agent if agent else ''}: {text}"
     gh('issue', 'comment', str(number), '-R', repo, '--body', body)
 
@@ -688,16 +750,17 @@ def load_delivered(cfg):
 
 def mark_delivered(cfg, repo, comments, keep_hours):
     """The owner's comments that reached a role (brief printed them). Only brief and the first watch write this."""
-    data = load_delivered(cfg) or {}
-    marks = data.setdefault(repo, {})
-    for c in comments:
-        marks[comment_key(c)] = c.get('createdAt') or c.get('created_at')
-    oldest = now() - dt.timedelta(hours=2 * keep_hours)
-    data[repo] = {k: at for k, at in marks.items() if parse_time(at) >= oldest}
-    tmp = delivered_path(cfg) + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=1)
-    os.replace(tmp, delivered_path(cfg))
+    with state_lock(cfg):
+        data = load_delivered(cfg) or {}
+        marks = data.setdefault(repo, {})
+        for c in comments:
+            marks[comment_key(c)] = c.get('createdAt') or c.get('created_at')
+        oldest = now() - dt.timedelta(hours=2 * keep_hours)
+        data[repo] = {k: at for k, at in marks.items() if parse_time(at) >= oldest}
+        tmp = delivered_path(cfg) + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, delivered_path(cfg))
 
 
 def agent_set_working(cfg, state, repo, issue):
@@ -747,9 +810,32 @@ def session_activity(cfg, session):
     return dt.datetime.fromtimestamp(max(os.path.getmtime(f) for f in files), dt.timezone.utc).replace(microsecond=0)
 
 
+def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind):
+    """One reminder for a holder that went quiet; still quiet escalate_minutes later: the owner is told and the task
+    goes back to the queue, so a free worker takes it."""
+    nudges = state.setdefault('nudges', {})
+    nudge = nudges.get(ref)
+    if nudge and last > parse_time(nudge['at']):
+        nudges.pop(ref)  # it reacted
+        nudge = None
+    if start - last < dt.timedelta(minutes=cfg['idle_minutes']):
+        return
+    if nudge is None:
+        nudges[ref] = {'at': iso(start)}
+        remind()
+    elif not nudge.get('told') and start - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']):
+        problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=who, last=iso(last), at=nudge['at'])
+        report_health(cfg, state, [problem], needs_owner=True, close=False)
+        nudge['told'] = iso(start)
+        number = int(ref.split('#')[1])
+        comment(cfg, repo, number, cfg['texts']['released'].format(session=who, last=iso(last)), 'health')
+        relabel(repo, number, remove=[cfg['labels']['working']])
+
+
 def check_held(cfg, state, repo, issues, start, plan):
     """A role that holds a task but whose session went quiet gets one reminder; if it stays quiet, the owner is told.
-    Seen without tokens from the session's transcript; where that cannot be seen, the dispatcher checks (get_session)."""
+    Seen without tokens from the session's transcript (a Codex task: its rollout file); where that cannot be seen,
+    the dispatcher checks (get_session). A Codex worker gets its reminder as a queued message, without the dispatcher."""
     nudges = state.setdefault('nudges', {})
     checks = state.setdefault('held_checked', {})
     idle = dt.timedelta(minutes=cfg['idle_minutes'])
@@ -759,8 +845,15 @@ def check_held(cfg, state, repo, issues, start, plan):
             ref = f"{repo}#{issue['number']}"
             held.add(ref)
             holder = state.get('holders', {}).get(ref)
+            codex = state.get('codex', {}).get(holder) if holder else None
+            if codex:
+                last = codex_activity(codex['thread']) if codex.get('host') == socket.gethostname() else None
+                if last:
+                    quiet_holder(cfg, state, repo, ref, role, holder, last, start,
+                                 lambda: message_codex(codex['thread'], nudge_text(cfg, ref, iso(last))))
+                continue
             if not pushes(role) or (holder and holder not in role['sessions']):
-                continue  # a pulling worker holds it: no desktop-app session to watch; health reports a stuck task
+                continue  # another worker holds it: no session to watch here; health reports a stuck task
             sid = holder_of(state, role, ref)
             if not sid:
                 continue
@@ -772,23 +865,8 @@ def check_held(cfg, state, repo, issues, start, plan):
                     plan.append(('held', ref, role, issue['title'], None, sid))
                     checks[ref] = iso(start)
                 continue
-            nudge = nudges.get(ref)
-            if nudge and last > parse_time(nudge['at']):
-                nudges.pop(ref)  # it reacted
-                nudge = None
-            if start - last < idle:
-                continue
-            if nudge is None:
-                nudges[ref] = {'at': iso(start)}
-                plan.append(('nudge', ref, role, issue['title'], iso(last), sid))
-            elif not nudge.get('told') and start - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']):
-                problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=sid,
-                                                          last=iso(last), at=nudge['at'])
-                report_health(cfg, state, [problem], needs_owner=True, close=False)
-                nudge['told'] = iso(start)
-                number = int(ref.split('#')[1])  # back to the queue, so a free session takes it
-                comment(cfg, repo, number, cfg['texts']['released'].format(session=sid, last=iso(last)), 'health')
-                relabel(repo, number, remove=[cfg['labels']['working']])
+            quiet_holder(cfg, state, repo, ref, role, sid, last, start,
+                         lambda: plan.append(('nudge', ref, role, issue['title'], iso(last), sid)))
     for table in (nudges, checks, state.setdefault('holders', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
@@ -969,6 +1047,7 @@ def build_plan(cfg, state, start):
         check_held(cfg, state, repo, issues, start, plan)
         check_prs(cfg, state, repo, start, issues)
         check_tests(cfg, state, repo, start, plan)
+        wake_codex(cfg, state, repo, issues, start)
         cache = {}
         for role in cfg['roles']:
             if not pushes(role):
@@ -996,7 +1075,7 @@ def build_plan(cfg, state, start):
     return plan
 
 
-def render_plan(cfg, plan, start, clear=False):
+def render_plan(cfg, plan, start, clear=False, wake=False):
     q = 'agentq'
     lines = [f'agentq plan {iso(start)} – do every step in order, without asking anyone. The session ids come from '
              f'the config and are current, even when they differ from ids you saw before (the owner may replace a session).']
@@ -1026,7 +1105,9 @@ def render_plan(cfg, plan, start, clear=False):
                       f'instead.') if cfg['links'] else ''
             lines.append(f'{n}. classify {ref} "{one_line(title, 80)}": pick a role (roles.md; unsure → '
                          f'{cfg["default_role"]}), run `{q} assign {ref} <role>` and do what it prints.{moving}')
-    if clear:  # the dispatcher needs no memory: the board and its files hold everything
+    if wake:  # a Codex dispatcher: its watcher keeps running
+        lines.append('Last: end your turn – the watcher keeps running and sends the next plan here.')
+    elif clear:  # the dispatcher needs no memory: the board and its files hold everything
         lines.append(f'Last: start `{q} watch` again in the background, then call clear_session with session_id "self".')
     else:
         lines.append(f'Last: start `{q} watch` again in the background.')
@@ -1067,13 +1148,113 @@ def running_in():
     return None
 
 
+def restart_if_updated(code):
+    """agentq changed while this loop ran: carry on in the new version, without waking anyone."""
+    if os.path.getmtime(os.path.realpath(__file__)) != code:
+        sys.stdout.flush()
+        os.execv(sys.executable, [sys.executable, os.path.realpath(__file__), *sys.argv[1:]])
+
+
+# ---------- Codex tasks ----------
+# Codex checks a running command with a model call about every minute, so a Codex task never waits in a command:
+# it ends its turn, and a message queued for it (`codex queue`) starts its next turn – no tokens in between.
+
+CODEX_HOME = os.path.expanduser(os.environ.get('CODEX_HOME') or '~/.codex')
+
+
+def codex_cli():
+    """AGENTQ_CODEX, else `codex` on PATH, else the Codex app's own CLI."""
+    if 'AGENTQ_CODEX' in os.environ:
+        return os.environ['AGENTQ_CODEX'] or None
+    bundled = sorted(glob.glob('/Applications/*.app/Contents/Resources/codex-cli/*.app/Contents/MacOS/codex'))
+    return shutil_which('codex') or (bundled[-1] if bundled else None)
+
+
+def codex_loaded(thread):
+    """A process – normally the Codex app – has the task loaded, so it runs a queued message once the task is idle."""
+    lock = os.path.join(CODEX_HOME, 'thread-writer-locks', f'{thread}.lock')
+    lsof = shutil_which('lsof') or '/usr/sbin/lsof'
+    if not os.path.exists(lock) or not os.path.exists(lsof):
+        return os.path.exists(lock)
+    return bool(subprocess.run([lsof, '-t', lock], capture_output=True, text=True).stdout.strip())
+
+
+def codex_app_running():
+    if 'AGENTQ_CODEX_APP' in os.environ:
+        return os.environ['AGENTQ_CODEX_APP'] == '1'
+    return subprocess.run(['pgrep', '-f', r'\.app/Contents/Resources/codex-cli/.*app-server'],
+                          capture_output=True).returncode == 0
+
+
+def codex_reachable(thread):
+    """A message would run soon: the task is loaded, or the Codex app runs and loads it. Codex closed: nothing runs."""
+    return codex_loaded(thread) or codex_app_running()
+
+
+def codex_activity(thread):
+    """When a Codex task last did anything: its rollout file's time. None when this cannot be seen."""
+    files = glob.glob(os.path.join(glob.escape(CODEX_HOME), 'sessions', '*', '*', '*',
+                                   f'rollout-*-{glob.escape(thread)}.jsonl'))
+    if not files:
+        return None
+    return dt.datetime.fromtimestamp(max(os.path.getmtime(f) for f in files), dt.timezone.utc).replace(microsecond=0)
+
+
+def message_codex(thread, text):
+    """Queue a message for a Codex task; it runs as soon as the task is idle. A task the Codex app has not loaded
+    (e.g. after the app restarted) is opened in the background, without taking focus, so the app loads it and runs
+    the message. Returns what went wrong, or None."""
+    cli = codex_cli()
+    if not cli:
+        return 'no Codex CLI found (set AGENTQ_CODEX to its path)'
+    try:
+        run = subprocess.run([cli, 'queue', '--thread', thread, '--message', text], capture_output=True, text=True)
+    except OSError as e:
+        return f'codex queue: {e}'
+    if run.returncode != 0:
+        return one_line(run.stderr or run.stdout or f'codex queue exited with {run.returncode}', 300)
+    if not codex_loaded(thread) and codex_app_running():
+        try:
+            subprocess.run([os.environ.get('AGENTQ_OPEN') or 'open', '-g', f'codex://threads/{thread}'],
+                           capture_output=True)
+        except OSError:
+            pass
+    return None
+
+
+def start_codex_watcher(cfg, opts, who):
+    """A Codex dispatcher never waits in a command (Codex checks a running command with a model call every minute):
+    the watcher runs on its own and sends each plan to the dispatcher's Codex task as a message."""
+    thread = os.environ.get('CODEX_THREAD_ID')
+    if not thread:
+        print('agentq watch: no CODEX_THREAD_ID, so no plan could reach this task – run it from a Codex task.')
+        return 1
+    update_state(cfg, lambda data: data.__setitem__('dispatcher_thread', thread))
+    lock = watch_lock(cfg, who)
+    if lock is None:
+        print('agentq watch: already running – it sends each plan to this task now. End your turn.')
+        return 0
+    lock.close()
+    args = [sys.executable, os.path.realpath(__file__), '--config', cfg['_path'], 'watch', '--wake']
+    for name in ('interval', 'max_minutes'):
+        if getattr(opts, name) is not None:
+            args += [f"--{name.replace('_', '-')}", str(getattr(opts, name))]
+    with open(cfg['state_file'] + '.watch.log', 'a') as log:
+        subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    print('agentq watch: the watcher runs on its own now and sends each plan to this task as a message. End your turn.')
+    return 0
+
+
 def cmd_watch(cfg, opts):
     here = running_in()
     agent = cfg['dispatcher']['agent']
     if here and agent != 'both' and here != agent:  # the team moved: this dispatcher stops, the other one runs
         print(f"agentq watch: this team's dispatcher runs on {agent} now – stop this loop.")
         return 1
-    lock = watch_lock(cfg, here if agent == 'both' else None)
+    who = here if agent == 'both' else None
+    if here == 'codex' and not opts.once and not opts.wake:
+        return start_codex_watcher(cfg, opts, who)
+    lock = watch_lock(cfg, who)
     if lock is None:
         print('agentq watch: already running – nothing to do.')
         return 0
@@ -1081,15 +1262,13 @@ def cmd_watch(cfg, opts):
     code = os.path.getmtime(os.path.realpath(__file__))
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     while True:
-        if deadline is not None and time.time() >= deadline:  # an agent that waits in the foreground (codex)
+        if deadline is not None and time.time() >= deadline:
             print('agentq watch: no work yet – run it again.')
             return 0
-        if os.getppid() == 1:  # started with & or nohup: its end would wake nobody, so the team would stall silently
+        if os.getppid() == 1 and not opts.wake:  # started with & or nohup: its end would wake nobody
             print('agentq watch: not started by the session (its parent is gone) – start it with run_in_background.')
             return 1
-        if os.path.getmtime(os.path.realpath(__file__)) != code:
-            print('agentq watch: agentq was updated – start the watcher again.')
-            return 0
+        restart_if_updated(code)
         state = load_state(cfg)
         start = now()
         work = copy.deepcopy(state)
@@ -1113,20 +1292,25 @@ def cmd_watch(cfg, opts):
             last = state.get('watch', {})
             count = state.get('plans', 0) + 1
             clear = bool(cfg['clear_every']) and count % int(cfg['clear_every']) == 0
-            text = render_plan(cfg, plan, start, clear) if plan else ''
+            text = render_plan(cfg, plan, start, clear, opts.wake) if plan else ''
             body = text.split('\n', 1)[-1]
             work['watch'] = {'pid': os.getpid(), 'beat': iso(start), 'plan': last.get('plan'), 'sent': last.get('sent')}
             if plan and body == last.get('plan') and start - parse_time(last['sent']) < dt.timedelta(minutes=cfg['repeat_minutes']):
                 plan = None  # the dispatcher did not act on this plan: do not wake it every minute for it
-            elif plan:
+            elif plan and opts.wake:  # a Codex dispatcher: the plan goes to its task as a message
+                error = message_codex(state.get('dispatcher_thread') or '-', text)
+                if error:
+                    work['watch']['error'] = f'the plan did not reach the dispatcher: {error}'
+                    plan = None  # tried again at the next poll
+            if plan:
                 work['watch'].update(exited=iso(start), plan=body, sent=iso(start))
                 work['plans'] = count
             save_state(cfg, work)
-            if plan:
+            if plan and not opts.wake:
                 print(text)
                 return 0
             if opts.once:
-                print('agentq watch: no work.')
+                print('agentq watch: plan sent to the dispatcher.' if plan else 'agentq watch: no work.')
                 return 0
         time.sleep(interval)
 
@@ -1158,11 +1342,11 @@ def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
         print(f'{n}. {step}')
 
 
-def claim(cfg, repo, number, text, who):
+def claim(cfg, repo, number, text, who, agent=None):
     """GitHub has no lock: post a claim, read the comments back; the earliest claim of the last 10 minutes wins.
     A loser deletes its claim and returns False, so two dispatchers or workers on other computers never share a task."""
     mine = f'{socket.gethostname()}/{who}/{uuid.uuid4().hex[:8]}'
-    comment(cfg, repo, number, f'{text}\n<!-- agentq:claim {mine} -->', who)
+    comment(cfg, repo, number, f'{text}\n<!-- agentq:claim {mine} -->', who, agent)
     comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
     recent = [c for c in comments if CLAIM_MARK.search(c.get('body') or '')
               and now() - parse_time(c['created_at']) <= dt.timedelta(minutes=10)]
@@ -1227,36 +1411,113 @@ def save_board(cfg, boards):
     os.replace(tmp, cfg['state_file'] + '.board.json')
 
 
+def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
+    """Claim the next task of these roles for a worker: priority, then blocking, then the oldest, each read again on
+    GitHub first (the board may be a minute old); else a checker's batch when one is ready. Returns (ref, role)."""
+    labels = cfg['labels']
+    add_agent, drop_agent = agent_labels(cfg, agent)
+    candidates = []
+    for role in roles:
+        held = busy_with(cfg, issues, role)
+        if not pushes(role) and role['pool'] and len(held) >= capacity(role):
+            continue
+        picked = list(skip)
+        while True:  # this role's queue, in its order
+            issue = next_issue(cfg, issues, role, picked)
+            if not issue:
+                break
+            picked.append(issue['number'])
+            candidates.append((role, issue))
+    candidates.sort(key=lambda c: (labels['priority'] not in labels_of(c[1]),
+                                   labels['blocking'] not in labels_of(c[1]), c[1]['number']))
+    for role, issue in candidates:
+        fresh = view(repo, issue['number'])
+        if fresh.get('state', 'OPEN') != 'OPEN' or labels['working'] in labels_of(fresh) \
+                or role['label'] not in labels_of(fresh):
+            continue
+        if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role'], agent):
+            relabel(repo, issue['number'], add=[labels['working']] + add_agent,
+                    remove=[n for n in drop_agent if n in labels_of(fresh)])
+            ref = f"{repo}#{issue['number']}"
+            state.setdefault('holders', {})[ref] = worker
+            state.setdefault('last_team', {})[role['role']] = agent
+            return ref, role
+        # a loser goes on: another worker took that one a moment earlier
+    for role in roles:
+        if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
+            items = unchecked(cfg, state, repo, role, {})[:20]
+            if batch_ready(cfg, role, items, now()):
+                ref = create_batch(cfg, state, repo, role, items, add_agent)
+                state.setdefault('holders', {})[ref] = worker
+                return ref, role
+    return None, None
+
+
+def codex_here(state):
+    """This Codex task's worker record, found by the task's id."""
+    thread = os.environ.get('CODEX_THREAD_ID')
+    for worker, info in state.get('codex', {}).items():
+        if thread and info.get('thread') == thread:
+            return worker, info
+    return None, None
+
+
+def note_finished(cfg):
+    """A Codex worker finished a task: should its turn end without `agentq next`, the watcher still wakes it."""
+    if running_in() != 'codex' or not os.environ.get('CODEX_THREAD_ID'):
+        return
+
+    def change(data):
+        worker, info = codex_here(data)
+        if info is not None:
+            info['finished'] = iso(now())
+    update_state(cfg, change)
+
+
 def cmd_next(cfg, opts):
-    """Take the next task and print its brief – the way every worker gets work, Claude sessions (run it in the
-    background) and Codex tasks alike. One role, or without a role any role this worker may pull for. With --wait it
-    waits without tokens until there is one (forever, or --max-minutes)."""
+    """Take the next task and print its brief – the way every worker gets work. One role, or without a role any role
+    this worker may pull for. A Claude session runs it with --wait in the background: it waits without tokens and
+    wakes the session with the task. A Codex task never waits – Codex checks a running command with a model call
+    every minute: with no task it ends its turn, and the watcher claims the next task for it and sends it a message."""
     here = running_in()
+    host = socket.gethostname()
     session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if here == 'claude' else None
-    worker = opts.who or session or f"{socket.gethostname().split('.')[0]}-{opts.role or 'team'}"
+    thread = os.environ.get('CODEX_THREAD_ID') if here == 'codex' else None
+    worker = opts.who or session or (f'codex-{thread[:8]}' if thread else None) or \
+        f"{host.split('.')[0]}-{opts.role or 'team'}"
 
     def may(role):  # a role's own Claude session, or any worker of a role that pulls
         return worker in role['sessions'] or pulls(role)
-    if opts.role:
-        roles = [role_by_name(cfg, opts.role)]
-        if not may(roles[0]):
-            print(f"{roles[0]['role']} does not pull (agent: claude) and {worker} is not its session: the dispatcher "
+    wanted = [role_by_name(cfg, opts.role)] if opts.role else cfg['roles']
+    roles = [r for r in wanted if may(r)]
+    again = ' '.join([os.path.realpath(__file__), 'next', *([shlex_quote(opts.role)] if opts.role else []),
+                      '--as', shlex_quote(worker)])
+    if thread:  # the watcher wakes this Codex task when one of these roles has work
+        record = {'thread': thread, 'host': host, 'roles': [r['role'] for r in wanted], 'next': again}
+        update_state(cfg, lambda data: data.setdefault('codex', {}).__setitem__(worker, {**record, 'idle': None}))
+    if not roles:
+        if thread:
+            update_state(cfg, lambda data: data['codex'][worker].__setitem__('idle', iso(now())))
+            print(f"{', '.join(r['role'] for r in wanted)} does not take Codex workers now (agent: claude). End your "
+                  f"turn: agentq sends this task a message when it does again.")
+            return 0
+        if opts.role:
+            print(f"{wanted[0]['role']} does not pull (agent: claude) and {worker} is not its session: the dispatcher "
                   f"sends its tasks. Stop this loop.")
-            return 1
-    else:
-        roles = [r for r in cfg['roles'] if may(r)]
-        if not roles:
+        else:
             print('no role this worker may pull for – `agentq role <name> --agent codex|both` first.')
-            return 1
+        return 1
     agent = 'claude' if worker in {x for r in roles for x in r['sessions']} or here == 'claude' else 'codex'
-    add_agent, drop_agent = agent_labels(cfg, agent)
+    wait = opts.wait and here != 'codex'
+    code = os.path.getmtime(os.path.realpath(__file__))
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     try:
         while True:
-            if os.getppid() == 1:
-                print('agentq next: its session is gone – stop.')
-                return 1
-            mark_waiting(cfg, worker, [r['role'] for r in roles])
+            if wait:
+                if os.getppid() == 1:
+                    print('agentq next: its session is gone – stop.')
+                    return 1
+                mark_waiting(cfg, worker, [r['role'] for r in roles])
             state = load_state(cfg)
             if not state.get('paused'):
                 holders = state.setdefault('holders', {})
@@ -1264,58 +1525,90 @@ def cmd_next(cfg, opts):
                     repo, number = ref.split('#')
                     fresh = view(repo, int(number)) if repo in cfg['repos'] else {}
                     if fresh.get('state', 'OPEN') == 'OPEN' and cfg['labels']['working'] in labels_of(fresh):
+                        save_state(cfg, state)
                         print(f'you hold {ref} – finish it first (agentq done / ask / route / wait); its task again:')
                         cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
                         return 0
                     del holders[ref]
                 for repo in cfg['repos']:
-                    issues = shared_board(cfg, state, repo)
-                    candidates = []
-                    for role in roles:
-                        held = busy_with(cfg, issues, role)
-                        if not pushes(role) and role['pool'] and len(held) >= capacity(role):
-                            continue
-                        picked = []
-                        while True:  # this role's queue, in its order
-                            issue = next_issue(cfg, issues, role, picked)
-                            if not issue:
-                                break
-                            picked.append(issue['number'])
-                            candidates.append((role, issue))
-                    labels = cfg['labels']
-                    candidates.sort(key=lambda c: (labels['priority'] not in labels_of(c[1]),
-                                                   labels['blocking'] not in labels_of(c[1]), c[1]['number']))
-                    ref = None
-                    for role, issue in candidates:
-                        fresh = view(repo, issue['number'])  # the snapshot may be a minute old
-                        if fresh.get('state', 'OPEN') != 'OPEN' or labels['working'] in labels_of(fresh) \
-                                or role['label'] not in labels_of(fresh):
-                            continue
-                        if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
-                            ref = f"{repo}#{issue['number']}"
-                            relabel(repo, issue['number'], add=[labels['working']] + add_agent,
-                                    remove=[n for n in drop_agent if n in labels_of(fresh)])
-                            break  # a loser goes on: another worker took that one a moment earlier
-                    if not ref:
-                        for role in roles:
-                            if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
-                                items = unchecked(cfg, state, repo, role, {})[:20]
-                                if batch_ready(cfg, role, items, now()):
-                                    ref = create_batch(cfg, state, repo, role, items, add_agent)
-                                    break
+                    ref, role = take_next(cfg, state, repo, shared_board(cfg, state, repo), roles, worker, agent)
                     if ref:
-                        holders[ref] = worker
                         save_state(cfg, state)
                         print(f'{ref} is yours now ({worker}).')
                         cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
                         return 0
-            if not opts.wait or (deadline is not None and time.time() >= deadline):
-                again = f'agentq next {opts.role} --wait' if opts.role else 'agentq next --wait'
-                print(f"nothing yet – run `{again}` again.")
+            if thread:
+                state.setdefault('codex', {}).setdefault(worker, record)['idle'] = iso(now())
+                save_state(cfg, state)
+                print(cfg['texts']['codex_idle'])
+                return 0
+            save_state(cfg, state)
+            if here == 'codex':
+                print('No task now, and this Codex task has no CODEX_THREAD_ID, so nothing can wake it: end your turn.')
+                return 0
+            if not wait or (deadline is not None and time.time() >= deadline):
+                print(f"nothing yet – run `{again.replace(' --as', ' --wait --as', 1)}` again.")
                 return 0
             time.sleep(cfg['poll_seconds'])
+            restart_if_updated(code)
     finally:
-        unmark_waiting(cfg, worker)
+        if wait:
+            unmark_waiting(cfg, worker)
+
+
+def reserve_codex(data, worker, seen, value):
+    """Only one watcher wakes a worker: its record must still be as this watcher saw it."""
+    info = data.get('codex', {}).get(worker)
+    if not info or (info.get('idle'), info.get('finished')) != seen:
+        return False
+    info['idle'], info['finished'] = value
+    return True
+
+
+def wake_codex(cfg, state, repo, issues, start):
+    """Idle Codex workers of this computer get their next task without tokens: the watcher claims it for them and
+    queues one message for their Codex task. While Claude sessions wait for the same role, the teams take turns."""
+    host = socket.gethostname()
+    held_by = set(state.get('holders', {}).values())
+    taken = []
+    workers = state.get('codex', {})
+    for worker in sorted(workers, key=lambda w: workers[w].get('idle') or workers[w].get('finished') or ''):
+        info = workers[worker]
+        if info.get('host') != host or worker in held_by:
+            continue
+        seen = (info.get('idle'), info.get('finished'))
+        if not seen[0]:
+            last = codex_activity(info['thread']) if seen[1] else None
+            if not last or start - last < dt.timedelta(minutes=2):
+                continue  # busy, or it may still run `agentq next` itself
+        turns = state.get('last_team', {})
+        roles = [r for r in cfg['roles'] if r['role'] in info.get('roles', []) and pulls(r)
+                 and not (turns.get(r['role']) == 'codex' and waiting_workers(cfg, r))]
+        if not any(next_issue(cfg, issues, r, taken) or r['mode'] == 'checker' for r in roles):
+            continue
+        if not codex_reachable(info['thread']):
+            continue  # Codex is closed: the task waits for Claude, or until the owner opens Codex
+        if not update_state(cfg, lambda data: reserve_codex(data, worker, seen, (None, None))):
+            continue  # another watcher on this computer woke it a moment ago
+        ref, role = take_next(cfg, state, repo, issues, roles, worker, 'codex', taken)
+        if not ref:
+            update_state(cfg, lambda data: reserve_codex(data, worker, (None, None), seen))
+            continue
+        info['idle'] = info['finished'] = None
+        update_state(cfg, lambda data: data.setdefault('holders', {}).__setitem__(ref, worker))
+        number = int(ref.split('#')[1])
+        taken.append(number)
+        for issue in issues:
+            if issue['number'] == number:
+                issue['labels'] = issue['labels'] + [{'name': cfg['labels']['working']}]
+        text = cfg['texts']['wake_task'].format(ref=ref, role=role['role'], worker=worker,
+                                                agentq=os.path.realpath(__file__), next=info.get('next'))
+        error = message_codex(info['thread'], text)
+        if error:  # back to the queue: a free worker takes it
+            comment(cfg, repo, number, cfg['texts']['codex_unreached'].format(worker=worker, error=error), 'health')
+            relabel(repo, number, remove=[cfg['labels']['working']])
+            state['holders'].pop(ref, None)
+            info['error'] = error
 
 
 def cmd_assign(cfg, opts):
@@ -1352,6 +1645,7 @@ def cmd_assign(cfg, opts):
             remove=remove + [n for n in agent_labels(cfg, 'claude')[1] if n in names])
     sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy], waiting_workers(cfg, role))
     state.setdefault('holders', {})[ref] = sid
+    state.setdefault('last_team', {})[role['role']] = 'claude'
     print(f"{ref} → {role['role']}, working. Now:")
     print_send(cfg, state, role, ref, names, batch=labels['batch'] in names, sid=sid)
     save_state(cfg, state)
@@ -2135,8 +2429,9 @@ def cmd_team(cfg, opts):
               'Codex workers: `agentq codex-workers` opens one per role. The dispatcher keeps sorting tasks '
               '(Claude, or a Codex task in its folder: "Read AGENTS.md and start the loop").')
     else:
-        print('Claude and Codex now both work every role: the dispatcher sends tasks to free Claude sessions, Codex '
-              'workers take the rest (`agentq codex-workers` opens one per role); claims keep them from sharing a task.')
+        print('Claude and Codex now both work every role: free workers of both take tasks in turns (the watcher wakes an '
+              'idle Codex worker with a message; `agentq codex-workers` opens one per role); claims keep them from '
+              'sharing a task.')
 
 
 def cmd_workers(cfg, opts):
@@ -2147,9 +2442,10 @@ def cmd_workers(cfg, opts):
     project = cfg.get('checkout') or os.getcwd()
     bridge = shutil_which('codex-bridge')
     text = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md points '
-            'to (section "Claude and Codex"), then loop without stopping: {agentq} next {role} --wait --max-minutes 55 --as {name} '
-            '(give that command a timeout of at least 60 minutes) → do the task by the skill → finish it with one agentq '
-            'command → again. No progress reports to the owner.')
+            'to (section "Claude and Codex"). Run `{agentq} next {role} --as {name}`, do the task it gives you by the '
+            'skill and finish it with one agentq command, then run it again. When it says there is no task, end your '
+            'turn: agentq sends this task a message when there is work. Never wait or poll in a command – in Codex that '
+            'costs a model call every minute. No progress reports to the owner.')
     opened = []
     for role in [r for r in cfg['roles'] if pulls(r)]:
         for n in range(have.get(role['role'], 0) + 1, opts.count + 1):
@@ -2304,10 +2600,12 @@ def main(argv=None):
     wt = sub.add_parser('watch', help='poll the board every minute; print a plan and exit when there is work')
     wt.add_argument('--once', action='store_true', help='poll once')
     wt.add_argument('--interval', type=float, help='seconds between polls (default: poll_seconds)')
-    wt.add_argument('--max-minutes', type=float, help='give up after this long (an agent that waits in the foreground)')
-    nx = sub.add_parser('next', help='pull mode (codex, …): take the role\'s next task and print its brief')
+    wt.add_argument('--max-minutes', type=float, help='give up after this long')
+    wt.add_argument('--wake', action='store_true', help=argparse.SUPPRESS)  # the detached watcher of a Codex dispatcher
+    nx = sub.add_parser('next', help="take the role's next task and print its brief (every worker gets work this way)")
     nx.add_argument('role', nargs='?', help='one role; without it, any role that pulls (one worker for the team)')
-    nx.add_argument('--wait', action='store_true', help='wait without tokens until there is one')
+    nx.add_argument('--wait', action='store_true', help='Claude: wait without tokens until there is one (in Codex '
+                                                         'a waiting command costs tokens: it ends its turn instead)')
     nx.add_argument('--max-minutes', type=float, help='with --wait: give up after this long (default: wait until there is one)')
     nx.add_argument('--as', dest='who', help='which worker takes it (default: this Claude session, or <host>-<role>)')
     s = sub.add_parser('assign', help='give an issue to a role (working if the role is free, else queued)')
@@ -2425,7 +2723,10 @@ def main(argv=None):
                 'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
-        return commands[opts.cmd](cfg, opts) or 0
+        code = commands[opts.cmd](cfg, opts) or 0
+        if code == 0 and opts.cmd in ('done', 'ask', 'route', 'wait', 'move', 'checked'):
+            note_finished(cfg)
+        return code
     except Fail as e:
         print(f'agentq: {e}', file=sys.stderr)
         return 1

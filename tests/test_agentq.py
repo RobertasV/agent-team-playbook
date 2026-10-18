@@ -32,6 +32,11 @@ class Base(unittest.TestCase):
         with open(gh, 'w') as f:
             f.write(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE}" "$@"\n')
         os.chmod(gh, 0o755)
+        for name in ('codex', 'open'):  # never the real Codex: these only log what agentq asked of them
+            fake = os.path.join(d, 'bin', f'fake-{name}')
+            with open(fake, 'w') as f:
+                f.write(f'#!/bin/sh\necho "$@" >> "{d}/{name}.log"\n')
+            os.chmod(fake, 0o755)
         self.log = os.path.join(d, 'gh.log')
         self.fixture = os.path.join(d, 'fixture.json')
         self.config = os.path.join(d, 'config.json')
@@ -50,19 +55,38 @@ class Base(unittest.TestCase):
         with open(self.fixture, 'w') as f:
             json.dump(value, f)
 
-    def run_tool(self, *args, now='2026-01-02T12:00:00Z', ok=True):
+    def run_tool(self, *args, now='2026-01-02T12:00:00Z', ok=True, env=None):
         run = subprocess.run([sys.executable, TOOL, '--config', self.config, *args],
-                             capture_output=True, text=True, env=self.env(now))
+                             capture_output=True, text=True, env={**self.env(now), **(env or {})})
         if ok:
             self.assertEqual(run.returncode, 0, run.stderr)
         return run
+
+    def as_codex(self, *args, thread='t1', now='2026-01-02T12:00:00Z', ok=True):
+        return self.run_tool(*args, now=now, ok=ok, env={'CODEX_THREAD_ID': thread})
+
+    def faked(self, name):
+        path = os.path.join(self.dir.name, f'{name}.log')
+        return open(path).read() if os.path.exists(path) else ''
+
+    def state(self, change=None):
+        path = self.config + '.state.json'
+        data = json.load(open(path)) if os.path.exists(path) else {}
+        if change:
+            change(data)
+            with open(path, 'w') as f:
+                json.dump(data, f)
+        return data
 
     def env(self, now='2026-01-02T12:00:00Z'):
         return {**os.environ, 'PATH': os.path.join(self.dir.name, 'bin') + os.pathsep + os.environ['PATH'],
                 'FAKE_GH_LOG': self.log, 'FAKE_GH_FIXTURE': self.fixture, 'AGENTQ_NOW': now,
                 'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': '',
                 'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx'),
-                'CLAUDECODE': '', 'CODEX_THREAD_ID': '', 'CODEX_SANDBOX': '', 'CLAUDE_CODE_HOST_SESSION_ID': ''}
+                'CLAUDECODE': '', 'CODEX_THREAD_ID': '', 'CODEX_SANDBOX': '', 'CLAUDE_CODE_HOST_SESSION_ID': '',
+                'AGENTQ_CODEX': os.path.join(self.dir.name, 'bin', 'fake-codex'), 'AGENTQ_CODEX_APP': '1',
+                'AGENTQ_OPEN': os.path.join(self.dir.name, 'bin', 'fake-open'),
+                'CODEX_HOME': os.path.join(self.dir.name, 'codexhome')}
 
     def body(self, call):
         return call[call.index('--body') + 1]
@@ -214,6 +238,8 @@ ROLES = [
      'model': 'mid', 'release_model': 'strong', 'since': '2026-01-01T00:00:00Z'},
 ]
 T0, T1, T2 = '2026-01-02T12:00:00Z', '2026-01-02T12:01:00Z', '2026-01-02T12:02:00Z'
+ICON = {f'repos/{REPO}/issues/7': {'title': 'Icon', 'body': 'a round icon', 'labels': [{'name': 'design'}],
+                                    'user': {'login': 'boss'}}}
 
 
 def closed(number, title, at, labels=(), reason='COMPLETED'):
@@ -495,7 +521,8 @@ class TeamTest(Base):
         self.assertIn('3 Codex task(s) opened', self.run_tool('codex-workers').stdout)
         self.assertIn('none missing', self.run_tool('codex-workers').stdout)
         log = open(os.path.join(self.dir.name, 'bridge.log')).read()
-        self.assertIn('next programmer --wait --max-minutes 55 --as codex-programmer', log)
+        self.assertIn('next programmer --as codex-programmer', log)
+        self.assertIn('end your turn', log)
         self.assertEqual(log.count('new --draft'), 3)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
@@ -530,6 +557,110 @@ class TeamTest(Base):
         board[REPO]['open'] = [issue(8, 'Logo', ['prog'])]
         self.data(board)
         self.assertNotIn('assign', self.run_tool('watch', '--once').stdout)  # no dispatcher wake for it
+
+    def rollout(self, thread, at):
+        """The Codex task's rollout file, last written at this time."""
+        path = os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02', f'rollout-2026-01-02T08-00-00-{thread}.jsonl')
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, 'a').close()
+        moment = datetime.datetime.fromisoformat(at.replace('Z', '+00:00')).timestamp()
+        os.utime(path, (moment, moment))
+
+    def test_a_codex_worker_without_a_task_ends_its_turn_and_the_watcher_wakes_it(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': []}})
+        self.assertIn('End your turn here', self.as_codex('next', 'designer', '--wait', '--as', 'cx').stdout)  # never waits
+        self.assertEqual(self.state()['codex']['cx']['thread'], 't1')
+        board = {REPO: {'open': [issue(7, 'Icon', ['design'])]}}
+        self.data(board)
+        self.assertNotIn('designer', self.run_tool('watch', '--once').stdout)  # no dispatcher wake: the watcher sent it
+        self.assertIn(f'queue --thread t1 --message Task {REPO}#7 for designer is yours now (worker cx)', self.faked('codex'))
+        self.assertIn('next designer --as cx', self.faked('codex'))
+        self.assertIn('-g codex://threads/t1', self.faked('open'))  # the app had not loaded it: opened in the background
+        self.assertIn('🤖 designer · codex: taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label', 'doing',
+                                                             '--add-label', 'codex'])
+        self.assertEqual(self.state()['holders'], {f'{REPO}#7': 'cx'})
+        board[REPO]['open'][0]['labels'].append({'name': 'doing'})
+        self.data(board)
+        self.run_tool('watch', '--once', now=T1)
+        self.assertEqual(self.faked('codex').count('queue'), 1)  # it works on it: woken once
+
+    def test_with_codex_closed_its_workers_get_nothing(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': []}})
+        self.as_codex('next', 'designer', '--as', 'cx')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
+        self.run_tool('watch', '--once', env={'AGENTQ_CODEX_APP': '0'})
+        self.assertEqual(self.faked('codex'), '')
+        self.assertEqual(self.calls(['issue', 'comment']), [])  # left for another worker
+
+    def test_a_codex_worker_that_finished_without_asking_for_more_is_still_woken(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}, 'api': ICON})
+        self.assertIn(f'{REPO}#7 is yours now (cx)', self.as_codex('next', 'designer', '--as', 'cx').stdout)
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design', 'doing'])]}})
+        self.as_codex('done', '7', 'drew it', now='2026-01-02T11:50:00Z')
+        self.assertTrue(self.state()['codex']['cx']['finished'])
+        self.rollout('t1', '2026-01-02T11:51:00Z')  # its turn ended there, without `agentq next`
+        self.data({REPO: {'open': [issue(8, 'Logo', ['design'])]}})
+        self.run_tool('watch', '--once')
+        self.assertIn(f'Task {REPO}#8 for designer is yours now (worker cx)', self.faked('codex'))
+
+    def test_a_quiet_codex_worker_is_reminded_by_a_message_then_its_task_goes_back(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}, 'api': ICON})
+        self.as_codex('next', 'designer', '--as', 'cx')
+        self.rollout('t1', '2026-01-02T11:50:00Z')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design', 'doing'])], 'next': 70}})
+        self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout)  # no dispatcher
+        self.assertIn(f"queue --thread t1 --message You hold {REPO}#7 ('doing')", self.faked('codex'))
+        self.run_tool('watch', '--once', now='2026-01-02T12:46:00Z')
+        self.assertIn('ask owner', self.calls(['issue', 'create'])[-1])
+        self.assertIn('back in the queue: its session (cx)', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'])
+
+    def test_claude_and_codex_take_turns_when_both_wait(self):
+        self.data({REPO: {'open': []}})
+        self.run_tool('team', 'both')
+        self.as_codex('next', 'programmer', '--as', 'cx')
+        os.makedirs(self.config + '.state.json.waiting', exist_ok=True)  # the Claude session local_p waits too
+        with open(self.config + '.state.json.waiting/local_p', 'w') as f:
+            json.dump({'worker': 'local_p', 'roles': ['programmer']}, f)
+        self.state(lambda s: s.__setitem__('last_team', {'programmer': 'codex'}))
+        self.data({REPO: {'open': [issue(7, 'Icon', ['prog'])]}})
+        self.assertNotIn('assign', self.run_tool('watch', '--once').stdout)  # Claude's turn: local_p takes it itself
+        self.assertEqual(self.faked('codex'), '')
+        self.state(lambda s: s.__setitem__('last_team', {'programmer': 'claude'}))
+        self.run_tool('watch', '--once', now=T1)
+        self.assertIn(f'Task {REPO}#7 for programmer is yours now (worker cx)', self.faked('codex'))
+
+    def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
+        self.data({REPO: {'open': [issue(4, 'Something new')]}})
+        self.run_tool('team', 'both')
+        self.assertIn('runs on its own now', self.as_codex('watch', '--max-minutes', '0', thread='d1').stdout)
+        self.assertEqual(self.state()['dispatcher_thread'], 'd1')
+        self.assertIn('plan sent to the dispatcher', self.run_tool('watch', '--wake', '--once').stdout)
+        self.assertIn(f'queue --thread d1 --message agentq plan', self.faked('codex'))
+        self.assertIn(f'classify {REPO}#4', self.faked('codex'))
+        self.assertIn('Last: end your turn – the watcher keeps running', self.faked('codex'))
+        self.assertNotIn('plan sent', self.run_tool('watch', '--wake', '--once', now=T1).stdout)  # sent once
+
+    def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
+        from importlib.machinery import SourceFileLoader
+        import importlib.util
+        spec = importlib.util.spec_from_loader('agentq_tool', SourceFileLoader('agentq_tool', TOOL))
+        tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tool)
+        base = {'holders': {'a#1': 'w1', 'a#2': 'w2'}, 'watch': {'beat': 1}}
+        ours = {'holders': {'a#1': 'w1', 'a#5': 'w5'}, 'watch': {'beat': 2}}  # took #5, let go of #2
+        disk = {'holders': {'a#1': 'w1', 'a#2': 'w2', 'a#9': 'w9'}, 'watch': {'beat': 1}, 'paused': {'why': 'stop'}}
+        self.assertEqual(tool.merged(base, ours, disk), {'holders': {'a#1': 'w1', 'a#5': 'w5', 'a#9': 'w9'},
+                                                         'watch': {'beat': 2}, 'paused': {'why': 'stop'}})
 
     def test_stats_compare_the_teams(self):
         claim = '\n<!-- agentq:claim h/x/1 -->'
@@ -915,7 +1046,7 @@ class TeamTest(Base):
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())
         agents = open(os.path.join(disp, 'AGENTS.md')).read()
-        self.assertIn(f'`{os.path.realpath(TOOL)} watch --max-minutes 9`', agents)
+        self.assertIn(f'Run `{os.path.realpath(TOOL)} watch` once. It starts the watcher on its own', agents)
 
     def test_role_adds_the_ready_made_marketer_and_sets_the_dispatcher_session(self):
         self.data({REPO: {'labels': []}})
@@ -1036,7 +1167,7 @@ class NoPrivateNamesTest(unittest.TestCase):
         hits = []
         for base, dirs, files in os.walk(ROOT):
             dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__')]
-            for name in files:
+            for name in [f for f in files if f != '.git']:  # in a git worktree .git is a file naming the main checkout
                 full = os.path.join(base, name)
                 try:
                     with open(full, encoding='utf-8') as f:

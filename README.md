@@ -6,7 +6,7 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 
 - **You only write issues.** No labels, no states, no copying text between chats. Comment on an issue and your words reach the session working on it.
 - **Low token use while idle.** A script watches the board every minute and spends no tokens. A mid model (the dispatcher) wakes only when there is work, routes it and goes back to sleep.
-- **Every worker pulls its next task.** After a task, a session waits in `agentq next --wait` without tokens and is woken with the next one – no dispatcher round-trip per task. The dispatcher only sorts new tasks, passes on your words and nudges a stuck session.
+- **Every worker pulls its next task.** After a task, a Claude session waits in `agentq next --wait` without tokens and is woken with the next one; a Codex worker ends its turn and the watcher wakes it with one message. No dispatcher round-trip per task: the dispatcher only sorts new tasks, passes on your words and nudges a stuck session.
 - **One task per session at a time.** Busy is read from the board, so a session never gets a second task while it works on one. A role may have several sessions (e.g. five programmers); each free one gets the next task.
 - **Strong where it counts, cheap where it doesn't.** Every role works on the strongest model at extra-high effort (*hard* issues: the highest). Only the dispatcher, which just routes, runs on a mid model at low effort.
 - **Checks in batches, not after every task.** A checker wakes after N finished tasks (or 24 h) and turns each problem into a new issue linked to the original.
@@ -44,7 +44,7 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 
 ## Claude and Codex
 
-Every role can be worked by Claude sessions, by Codex workers, or by both at once – they compete for the same tasks, and claims keep two from taking one. Each task gets a `claude` or `codex` label, and comments say which team wrote them; `agentq stats` compares the teams. Move the work to whichever has tokens left: `agentq team codex` (Claude off), `agentq team claude` (Codex off), `agentq team both`. `agentq codex-workers` opens one prefilled Codex task per role in the Codex app; press Send on each. A Codex worker loops on `agentq next <role> --wait` (waits without tokens), does the task and finishes it with the usual commands. Reminders for quiet sessions and per-task model switches are Claude-only.
+Every role can be worked by Claude sessions, by Codex workers, or by both at once – they compete for the same tasks, and claims keep two from taking one. Each task gets a `claude` or `codex` label, and comments say which team wrote them; `agentq stats` compares the teams. Move the work to whichever has tokens left: `agentq team codex` (Claude off), `agentq team claude` (Codex off), `agentq team both`. `agentq codex-workers` opens one prefilled Codex task per role in the Codex app; press Send on each. A Codex worker never waits in a command – Codex checks a running command with a model call every minute. With no task it ends its turn; the watcher claims its next task and wakes it with one message (`codex queue`), and reminds it the same way when it goes quiet holding a task. A Codex dispatcher works the same way: its watcher runs on its own and sends each plan as a message. Per-task model switches are Claude-only.
 
 ## Install into a project
 

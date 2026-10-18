@@ -55,7 +55,14 @@ Busy is read from the board, so a role never gets a second task while it works o
 
 ## Tokens: no more than one session doing everything
 
-The owner's rule (2026-10-18): the team must not spend more model requests on the same work than one session would. So every worker pulls: after a task it waits in `agentq next --wait` (Claude: a background command, woken when its task arrives; Codex: a foreground command of up to 55 minutes) – waiting costs no tokens, and taking a task costs one command, as it would for a lone session. The dispatcher is woken only to sort new tasks into roles, pass on the owner's words and nudge a quiet session; it sends tasks only to sessions that are not waiting. Waiting workers read the watcher's board snapshot instead of asking GitHub themselves.
+The owner's rule (2026-10-18): the team must not spend more model requests on the same work than one session would. So every worker pulls, and no agent ever waits inside a command that costs tokens:
+
+- **Claude:** after a task a session runs `agentq next <role> --wait` as a background command. The session's turn ends; the command waits without tokens and wakes it when its task arrives.
+- **Codex:** Codex checks a running command with a model call about every minute. Measured on 2026-10-18: one 12-minute `agentq next --wait` cost 28 model calls (716k input tokens); a worker waiting 45 minutes cost 137 calls (17M input tokens, nearly all cached). So a Codex worker never waits: with no task it ends its turn. The watcher claims its next task for it and queues one message for its Codex task (`codex queue --thread <id>`); the Codex app runs it as soon as the task is idle. A task the app has not loaded (after an app restart) is opened in the background (`open -g codex://threads/<id>`), which loads it and runs the message without taking focus. With Codex closed, its workers get nothing, so the task waits for Claude. A Codex worker that ends its turn after finishing, without asking for more, is still woken: `done` marks it finished, and once its task has been quiet for two minutes the watcher treats it as idle. When it goes quiet holding a task (seen from its rollout file), the reminder is a queued message too. A Codex dispatcher's watcher runs on its own and sends each plan to the dispatcher's task as a message.
+
+Taking a task therefore costs one turn, as it would for a lone session. The dispatcher is woken only to sort new tasks into roles, pass on the owner's words and nudge a quiet Claude session; it sends tasks only to sessions that are not waiting. When Claude sessions and Codex workers both wait for a role, they take turns. Waiting workers read the watcher's board snapshot instead of asking GitHub themselves. A loop that waits (the watcher, `agentq next --wait`) carries on in a new agentq version without waking anyone.
+
+Several processes write the state file (the watcher, workers, the dispatcher's commands). Each save is a three-way merge under a lock, so a save keeps what others changed meanwhile, such as a task a worker just took or the owner's pause.
 
 ## Claude and Codex
 

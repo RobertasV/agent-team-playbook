@@ -471,6 +471,19 @@ class TeamTest(Base):
         self.assertIn('the watcher is not running: send the dispatcher (local_x) "Start the watcher"', out)
         self.assertIn('agentq plan', self.run_tool('watch', '--once').stdout)
 
+    def test_every_nth_plan_tells_the_dispatcher_to_clear_its_conversation(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['clear_every'] = 2
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.data({REPO: {'open': [issue(4, 'New', comments=[])]}})
+        first = self.run_tool('watch', '--once', now=T0).stdout
+        self.assertNotIn('clear_session', first)
+        self.data({REPO: {'open': [issue(5, 'Newer')]}})
+        second = self.run_tool('watch', '--once', now=T1).stdout
+        self.assertIn('then call clear_session with session_id "self"', second)
+
     def test_assign_starts_a_free_role_queues_for_a_busy_one_and_sets_effort(self):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(4, 'Icon', ['ask owner']),
                                    issue(8, 'Hard one', ['hard']), issue(9, 'Easy one')]}})

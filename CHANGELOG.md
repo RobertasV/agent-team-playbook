@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.28 – 2026-10-18
+- Every `clear_every` (20) plans the plan ends with "then call clear_session with session_id \"self\"": the dispatcher empties its own conversation (the owner's word, written into its CLAUDE.md), so each wake no longer re-reads hundreds of thousands of tokens of history. Its Remote Control must be off for the app to allow it.
+
 ## 0.2.27 – 2026-10-18
 - Test modes (`agentq tests per-task|batched`, config `tests`): batched lets each task run only the tests that touch it while the watcher runs the full suite every `tests.every` finished tasks, detached, in its own checkout – no tokens. Green records the last green commit; red wakes the checker once with the commit range. Briefs say which mode applies; batch reports state the last full run.
 

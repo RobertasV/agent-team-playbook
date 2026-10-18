@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.56 – 2026-10-18
+- "3 programmers" in Codex: `agentq codex-workers 3 --role <role>` lists the missing Codex workers of one role (codex-<role>, codex-<role>-2, …) to create with `create_thread`; `agentq scale` stays for Claude sessions (a Codex dispatcher had used it and rested a Claude session).
+
 ## 0.2.55 – 2026-10-18
 - Two lives, the tickets between them: a Codex dispatcher's plan only sorts (classify, answered) and its `assign` only queues – it never takes a task for a Claude session it cannot reach; `assign` of a task the other dispatcher already started does nothing.
 

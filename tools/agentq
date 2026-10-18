@@ -2506,14 +2506,14 @@ def cmd_workers(cfg, opts):
     sessions. Prints a title and a first message for each missing one: a Codex task in the app creates them with its
     create_thread tool (no clicks); elsewhere the owner does it with New task. Workers already running on this computer
     are left out; an archived or deleted one counts as missing."""
-    roles = [r for r in cfg['roles'] if pulls(r)]
+    roles = [r for r in cfg['roles'] if pulls(r) and (not opts.role or r is role_by_name(cfg, opts.role))]
     if not roles:
         print('no role takes Codex workers – `agentq team both` (or `agentq role <name> --agent both`) first.')
         return
     host = socket.gethostname()
     have = {w for w, i in load_state(cfg).get('codex', {}).items() if i.get('host') == host and codex_activity(i['thread'])}
-    names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else ''),
-              f"Codex {r['role']}" + (f' {n}' if opts.count > 1 else ''),
+    names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if n > 1 else ''),
+              f"Codex {r['role']}" + (f' {n}' if n > 1 else ''),
               {'max': 'xhigh'}.get(r['effort'], r['effort']) or 'xhigh')  # Codex has no "max"
              for r in roles for n in range(1, opts.count + 1)]
     missing = [x for x in names if x[1] not in have]
@@ -2769,6 +2769,7 @@ def main(argv=None):
     st.add_argument('--days', type=float, default=30)
     cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')
     cw.add_argument('count', type=int, nargs='?', default=1, help='workers per role (default 1)')
+    cw.add_argument('--role', help='only this role, e.g. "3 Codex programmers": codex-workers 3 --role programmer')
     lv = sub.add_parser('live', help="which role restarts the owner's running copy after GO, and how (--off: none)")
     lv.add_argument('role', nargs='?')
     lv.add_argument('command', nargs='?', help='the restart command; {sha} is the commit')

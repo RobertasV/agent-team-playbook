@@ -105,4 +105,6 @@ The owner says which, in one word → `agentq tests per-task` or `agentq tests b
 
 ## How many work in parallel
 
-The owner says e.g. "10 programmers" → `agentq scale <role> 10` and do what it prints: start each missing session with the printed number in its title (the owner asked, so start them yourself), move it into the team's sidebar group, record it with `agentq role <role> --add-session <id>`. Fewer ("3 programmers") → `agentq scale <role> 3`: the rest get no new tasks and finish what they hold. Never archive or delete them: the next "more" reuses them first (unarchive one if the owner archived it).
+In Codex (its own life): "3 programmers" → `agentq codex-workers 3 --role <role>` and create each worker it lists with `create_thread`; fewer: archive the extra Codex tasks (an archived worker gets nothing). Never `agentq scale` from Codex – it sets the Claude sessions.
+
+In Claude: the owner says e.g. "10 programmers" → `agentq scale <role> 10` and do what it prints: start each missing session with the printed number in its title (the owner asked, so start them yourself), move it into the team's sidebar group, record it with `agentq role <role> --add-session <id>`. Fewer ("3 programmers") → `agentq scale <role> 3`: the rest get no new tasks and finish what they hold. Never archive or delete them: the next "more" reuses them first (unarchive one if the owner archived it).

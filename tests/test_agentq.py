@@ -527,6 +527,10 @@ class TeamTest(Base):
                                'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
         out = self.run_tool('codex-workers').stdout
         self.assertIn('--- Codex designer (reasoning effort: xhigh) ---', out)
+        more = self.run_tool('codex-workers', '3', '--role', 'programmer').stdout  # "3 Codex programmers"
+        self.assertIn('--- Codex programmer 2', more)
+        self.assertIn('--as codex-programmer-3', more)
+        self.assertNotIn('designer', more)
         self.assertNotIn('--- Codex programmer', out)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):

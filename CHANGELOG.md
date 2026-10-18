@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.63 – 2026-10-18
+- One health issue, even when two problems are reported in the same minute (GitHub's list did not show the issue created a moment before, so a second one was opened).
+
 ## 0.2.62 – 2026-10-18
 - When a task the owner was told is stuck moves on (its session woke up, or it got finished), the watcher says so on the health issue at once and closes it when nothing else is wrong – the owner no longer finds a stale alarm.
 

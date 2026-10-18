@@ -2186,6 +2186,9 @@ def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):
     repo = cfg['repos'][0]
     label = cfg['labels']['health']
     found = gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '5', '--json', 'number')
+    if not found and state.get('health_issue'):  # created a moment ago: GitHub's list may not show it yet
+        known = view(repo, state['health_issue'])
+        found = [{'number': state['health_issue']}] if known.get('state') == 'OPEN' else []
     if done and found:
         comment(cfg, repo, found[0]['number'], texts['health_moved'].format(refs=', '.join(done)), 'health')
         if close:
@@ -2202,6 +2205,7 @@ def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):
         print(f"problems reported on {repo}#{number}:\n{report}")
     elif problems:
         number = create_issue(repo, texts['health_title'], f'🤖 health:\n{report}', [label] + extra)
+        state['health_issue'] = number
         print(f'problems reported in {repo}#{number}:\n{report}')
     elif found and close:
         number = found[0]['number']

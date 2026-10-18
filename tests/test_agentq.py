@@ -285,7 +285,7 @@ class TeamTest(Base):
         self.assertIn('no work', self.run_tool('watch', '--once', now=T0).stdout)  # quiet 10 min: fine
         out = self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout
         self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z: send this line to '
-                      f"session local_p: `You hold {REPO}#7 ('doing'), but your session has been idle since 2026-01-02T11:50:00Z.", out)
+                      f"session local_p (agentq checked: it exists): `You hold {REPO}#7 ('doing'), but your session has been idle since 2026-01-02T11:50:00Z.", out)
         self.assertIn("You hold acme/app#7 ('doing')", self.run_tool('nudge', '7', '--last', '2026-01-02T11:50:00Z').stdout)
         self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T12:30:00Z').stdout)  # one reminder
         self.assertEqual(self.calls(['issue', 'create']), [])
@@ -342,7 +342,7 @@ class TeamTest(Base):
         self.session('local_p3', '2026-01-02T11:59:00Z')
         out = self.run_tool('watch', '--once').stdout
         self.assertIn(f'programmer holds {REPO}#2 but has been quiet since 2026-01-02T11:00:00Z: send this line to '
-                      f'session local_p2: `You hold {REPO}#2', out)
+                      f'session local_p2 (agentq checked: it exists): `You hold {REPO}#2', out)
 
     def test_scale_starts_numbered_sessions_and_keeps_resting_ones(self):
         self.data({REPO: {'labels': []}})

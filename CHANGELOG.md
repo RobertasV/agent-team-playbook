@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.25 – 2026-10-18
+- `gh` calls retry twice on a 502/503/504 or a timeout.
+- A plan says "(agentq checked: it exists)" for a session the desktop app knows; the dispatcher never checks ids against list_sessions or linked-session notes.
+
 ## 0.2.24 – 2026-10-18
 - A task whose session ignored the reminder goes back to the queue (working label removed, a comment says why) besides the owner's "needs you", so a free session takes it.
 - Open pull requests: checked hourly; one untouched for `stale_pr_days` (3) becomes a task for the default role – finish it or close it saying what replaced it. Once per stall.

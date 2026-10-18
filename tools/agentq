@@ -138,7 +138,12 @@ def iso(moment):
 
 
 def gh(*args):
-    run = subprocess.run(['gh', *args], capture_output=True, text=True)
+    for attempt in range(3):  # GitHub sometimes answers 502/503 or times out for a moment
+        run = subprocess.run(['gh', *args], capture_output=True, text=True)
+        transient = re.search(r'\b50[234]\b|timeout|timed out|connection reset', run.stderr, re.I)
+        if run.returncode == 0 or not transient or attempt == 2:
+            break
+        time.sleep(2 * (attempt + 1))
     if run.returncode != 0:
         raise Fail(f"gh {' '.join(args[:3])}: {run.stderr.strip() or run.stdout.strip()}")
     return run.stdout
@@ -304,9 +309,18 @@ def checked_label(cfg, role):
     return cfg['labels']['checked'].format(role=role['role'])
 
 
+APP_SESSIONS = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or
+                                  '~/Library/Application Support/Claude/claude-code-sessions')
+
+
 def session_of(role, sid=None):
-    """The session a plan sends to, by id only: a name invites the dispatcher to doubt it against names it remembers."""
-    return f"session {sid or role['session'] or '(none in the config for ' + role['role'] + ' – run setup)'}"
+    """The session a plan sends to, by id only: a name invites the dispatcher to doubt it against names it remembers.
+    When the desktop app's records show the session exists, the plan says so."""
+    sid = sid or role['session']
+    if not sid:
+        return f"session (none in the config for {role['role']} – run setup)"
+    seen = glob.glob(os.path.join(glob.escape(APP_SESSIONS), '*', '*', f'{glob.escape(sid)}.json'))
+    return f"session {sid}" + (' (agentq checked: it exists)' if seen else '')
 
 
 def capacity(role):

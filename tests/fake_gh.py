@@ -41,7 +41,16 @@ elif args[:2] == ['pr', 'list']:
     print(json.dumps(repo.get('prs', [])))
 elif args[:2] == ['label', 'list']:
     print(json.dumps([{'name': n} for n in repo.get('labels', [])]))
-elif args[:2] in (['issue', 'comment'], ['issue', 'edit'], ['issue', 'close'], ['label', 'create']):
+elif args[:2] == ['issue', 'comment']:  # remembered, so a claim can read itself back
+    key = f"repos/{opt('-R')}/issues/{args[2]}/comments"
+    listing = data.setdefault('api', {}).setdefault(key, [])
+    listing.append({'id': 1000 + len(listing), 'user': {'login': 'bot'}, 'body': opt('--body'),
+                    'created_at': os.environ.get('AGENTQ_NOW', '2026-01-02T12:00:00Z')})
+    with open(os.environ['FAKE_GH_FIXTURE'], 'w', encoding='utf-8') as f:
+        json.dump(data, f)
+elif args[:2] in (['issue', 'edit'], ['issue', 'close'], ['label', 'create']):
+    pass
+elif args[:3] == ['api', '-X', 'DELETE']:
     pass
 elif args[0] == 'api' and '/contents/' in args[1]:
     if args[1] not in data.get('raw', {}):

@@ -57,6 +57,10 @@ Busy is read from the board, so a role never gets a second task while it works o
 
 Decided by the owner on 2026-10-18. A role marked `agent: codex` (or any non-Claude agent) pulls instead of being sent tasks: `agentq next <role> --wait` takes its next task (priority → blocking → oldest; a checker-mode role gets its batch) and prints the brief. The watcher plans nothing for it, `assign` only queues for it, and new owner words reach it through `agentq done`, which shows unanswered words instead of closing. Session reminders and model switches stay Claude-only.
 
+## Many computers
+
+The owner asked for a universal skill that scales (2026-10-18): one dispatcher per project, workers anywhere. GitHub has no lock, so `next` and `assign` claim a task with a comment carrying a unique mark, read the comments back, and keep it only if theirs is the earliest claim of the last ten minutes; a loser deletes its claim and moves on. Per-computer state (who holds what, delivered words) stays local; the board is the shared truth.
+
 ## Test modes
 
 Decided by the owner on 2026-10-18, so programming goes faster (a full suite after every task took 15–25 minutes). Per-task: each task runs the whole suite. Batched: a task runs only the tests that touch it; the watcher (a script, no tokens) runs the whole suite every N finished tasks on the newest main in its own checkout. Green records the last green commit; red wakes the checker once with the range since the last green one, to find the culprit, tell a real bug from a flaky test and open an urgent issue. The checker's batch report states the last full run.

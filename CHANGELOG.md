@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.38 – 2026-10-18
+- Safe across computers: `next` and `assign` claim a task with a marked comment, read it back and keep it only when theirs is the earliest claim of the last 10 minutes; a loser deletes its claim and takes the next task. Workers on any number of computers, and even two dispatchers, never share a task.
+
 ## 0.2.37 – 2026-10-18
 - The whole team can run on Codex: `agentq team codex|claude` switches the dispatcher and every role; a dispatcher running on the other agent stops at its next watch. The dispatcher folder gets an AGENTS.md for a Codex dispatcher, which loops on `agentq watch --max-minutes 9`.
 

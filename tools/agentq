@@ -15,6 +15,8 @@ import html
 import json
 import os
 import re
+import socket
+import uuid
 from shlex import quote as shlex_quote
 import subprocess
 import sys
@@ -29,6 +31,7 @@ PROJECT_CONFIG = '.agentq.json'
 FULL = 'Accept: application/vnd.github.full+json'
 WAIT_MARK = re.compile(r'<!-- agentq:wait ([\w.-]+/[\w.-]+)#(\d+) -->')
 ROUTE_MARK = '<!-- agentq:route -->'
+CLAIM_MARK = re.compile(r'<!-- agentq:claim (\S+) -->')
 BATCH_MARK = re.compile(r'<!-- agentq:batch (\{.*?\}) -->')
 REF = re.compile(r'^(?:([\w.-]+/[\w.-]+)#)?#?(\d+)$')
 ARROW = re.compile(r'\s*(?:→|->)\s*')
@@ -1102,6 +1105,23 @@ def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
         print(f'{n}. {step}')
 
 
+def claim(cfg, repo, number, text, who):
+    """GitHub has no lock: post a claim, read the comments back; the earliest claim of the last 10 minutes wins.
+    A loser deletes its claim and returns False, so two dispatchers or workers on other computers never share a task."""
+    mine = f'{socket.gethostname()}/{who}/{uuid.uuid4().hex[:8]}'
+    comment(cfg, repo, number, f'{text}\n<!-- agentq:claim {mine} -->', who)
+    comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
+    recent = [c for c in comments if CLAIM_MARK.search(c.get('body') or '')
+              and now() - parse_time(c['created_at']) <= dt.timedelta(minutes=10)]
+    recent.sort(key=lambda c: (c['created_at'], c.get('id', 0)))
+    if not recent or CLAIM_MARK.search(recent[0]['body']).group(1) == mine:
+        return True
+    for c in recent:
+        if CLAIM_MARK.search(c['body']).group(1) == mine and c.get('id'):
+            gh('api', '-X', 'DELETE', f"repos/{repo}/issues/comments/{c['id']}")
+    return False
+
+
 def cmd_next(cfg, opts):
     """Pull mode, for agents outside the desktop app (codex, …): take this role's next task and print its brief.
     With --wait it waits without tokens until there is one (at most --max-minutes, then says to run it again)."""
@@ -1126,11 +1146,13 @@ def cmd_next(cfg, opts):
                     return 0
                 if len(held) >= max(capacity(role), 1) and role['pool']:
                     continue
+                ref, lost = None, []
                 issue = next_issue(cfg, issues, role)
-                ref = None
+                while issue and not claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
+                    lost.append(issue['number'])  # another worker took it a moment earlier
+                    issue = next_issue(cfg, issues, role, lost)
                 if issue:
                     ref = f"{repo}#{issue['number']}"
-                    comment(cfg, repo, issue['number'], cfg['texts']['take'], role['role'])
                     relabel(repo, issue['number'], add=[cfg['labels']['working']])
                 elif role['mode'] == 'checker' and not held:
                     items = unchecked(cfg, state, repo, role, {})[:20]
@@ -1175,7 +1197,9 @@ def cmd_assign(cfg, opts):
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, queued ({role['role']} works on #{busy[0]['number']}). Nothing to send.")
         return
-    comment(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who)
+    if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who):
+        print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
+        return
     relabel(repo, number, add=[role['label'], labels['working']], remove=remove)
     sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy])
     state.setdefault('holders', {})[ref] = sid

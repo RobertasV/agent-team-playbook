@@ -45,6 +45,10 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 
 A role may run in Codex or another agent instead of a Claude session: `agentq role <name> --agent codex`. The dispatcher then sends it nothing; the agent loops on `agentq next <role> --wait` (waits without tokens, prints the next task), does the task and finishes it with the usual commands. `agentq init --codex` points the project's AGENTS.md at the skill. `agentq team codex` moves the whole team, dispatcher included: the dispatcher folder has an AGENTS.md for a Codex dispatcher, and the Claude dispatcher stops by itself; `agentq team claude` moves it back. Reminders for quiet sessions and per-task model switches are Claude-only; the hourly health check still reports a task that stops moving.
 
+## Many computers
+
+One dispatcher per project is enough: it only sorts new tasks into roles. Workers can run on any number of computers: each pulls with `agentq next <role> --wait` (or is a Claude session the dispatcher sends to). Taking a task is safe across computers: the taker posts a claim, reads the comments back, and only the earliest claim of the last ten minutes wins – a loser deletes its claim and takes the next task. GitHub is the only shared state, so every computer needs `gh` signed in as the AI account and the project's config.
+
 ## Install into a project
 
 Do this once per project. The team is never installed globally.

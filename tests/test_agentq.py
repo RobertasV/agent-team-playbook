@@ -459,6 +459,21 @@ class TeamTest(Base):
         self.run_tool('role', 'designer', '--agent', 'claude')
         self.assertIn('Stop this loop.', self.run_tool('next', 'designer', ok=False).stdout)
 
+    def test_a_task_another_computer_claimed_first_is_left_to_it(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        other = {'id': 5, 'user': {'login': 'bot'}, 'body': '🤖 designer: taking this.\n<!-- agentq:claim pc2/designer/abc -->',
+                 'created_at': '2026-01-02T11:59:58Z'}
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design']), issue(8, 'Logo', ['design', 'priority'])]},
+                   'api': {f'repos/{REPO}/issues/8/comments': [other],
+                           f'repos/{REPO}/issues/7': {'title': 'Icon', 'body': 'x', 'labels': [{'name': 'design'}],
+                                                       'user': {'login': 'boss'}}}})
+        out = self.run_tool('next', 'designer').stdout
+        self.assertIn(f'{REPO}#7 is yours now', out)  # #8 went to pc2
+        deleted = [c for c in self.calls() if c[:3] == ['api', '-X', 'DELETE']]
+        self.assertEqual(deleted, [['api', '-X', 'DELETE', f'repos/{REPO}/issues/comments/1001']])
+        self.assertNotIn(['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'], self.calls(['issue', 'edit']))
+
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},
                    'api': {f'repos/{REPO}/issues/7/comments': [

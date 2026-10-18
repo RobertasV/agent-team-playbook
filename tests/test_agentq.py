@@ -241,8 +241,8 @@ class TeamTest(Base):
         fixture[REPO]['open'][3]['comments'].append(said('bot', '🤖 programmer: more', '2026-01-02T12:00:50Z'))
         self.data(fixture)
         second = self.run_tool('watch', '--once', now=T1).stdout
-        self.assertIn(f'the owner wrote on {REPO}#3 (designer): send the output of '
-                      f'`agentq brief {REPO}#3 --since 2026-01-02T12:00:30Z` to designer (local_d)', second)
+        self.assertIn(f'the owner wrote on {REPO}#3 (designer): send this line to designer (local_d): `The owner wrote '
+                      f'more on {REPO}#3, your task: run agentq brief {REPO}#3 --since 2026-01-02T12:00:30Z and act on it.`', second)
         self.assertIn(f'the owner answered on {REPO}#6: run `agentq assign {REPO}#6 programmer`', second)
         self.assertNotIn(f'assign {REPO}#2', second)
         self.assertIn('no work', self.run_tool('watch', '--once', now=T2).stdout)
@@ -284,8 +284,8 @@ class TeamTest(Base):
         self.session('local_p', '2026-01-02T11:50:00Z')
         self.assertIn('no work', self.run_tool('watch', '--once', now=T0).stdout)  # quiet 10 min: fine
         out = self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout
-        self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z: send the output of '
-                      f'`agentq nudge {REPO}#7 --last 2026-01-02T11:50:00Z` to programmer (local_p)', out)
+        self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z: send this line to '
+                      f"programmer (local_p): `You hold {REPO}#7 ('doing'), but your session has been idle since 2026-01-02T11:50:00Z.", out)
         self.assertIn("You hold acme/app#7 ('doing')", self.run_tool('nudge', '7', '--last', '2026-01-02T11:50:00Z').stdout)
         self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T12:30:00Z').stdout)  # one reminder
         self.assertEqual(self.calls(['issue', 'create']), [])
@@ -310,7 +310,7 @@ class TeamTest(Base):
                       f'--running <its isRunning> --last <its lastActivityAt>`', out)
         self.assertIn('nothing to do', self.run_tool('held', '7', '--running', 'true', '--last', '2026-01-02T09:00:00Z').stdout)
         out = self.run_tool('held', '7', '--running', 'false', '--last', '2026-01-02T11:00:00Z').stdout
-        self.assertIn(f'send the output of `agentq nudge {REPO}#7 --last 2026-01-02T11:00:00Z` to programmer (local_p)', out)
+        self.assertIn(f"send this line to programmer (local_p): `You hold {REPO}#7 ('doing'), but your session has been idle since 2026-01-02T11:00:00Z", out)
         self.assertIn('waiting – nothing to do', self.run_tool('held', '7', '--running', 'false', '--last',
                                                               '2026-01-02T11:00:00Z', now='2026-01-02T12:10:00Z').stdout)
         self.assertIn('told the owner', self.run_tool('held', '7', '--running', 'false', '--last', '2026-01-02T11:00:00Z',
@@ -327,7 +327,7 @@ class TeamTest(Base):
         self.assertIn(f'assign {REPO}#3 programmer', out)
         self.assertNotIn(f'assign {REPO}#4', out)
         out = self.run_tool('assign', '2', 'programmer').stdout
-        self.assertIn(f'send the output of `agentq brief {REPO}#2` to programmer (local_p2)', out)  # #1 holds p1
+        self.assertIn(f'send this line to programmer (local_p2): `Task {REPO}#2 for programmer', out)  # #1 holds p1
         self.data({REPO: {'open': [issue(1, 'A', ['prog', 'doing']), issue(2, 'B', ['prog', 'doing']),
                                    issue(3, 'C', ['prog']), issue(4, 'D', ['prog'])]}})
         self.assertIn('to programmer (local_p3)', self.run_tool('assign', '3', 'programmer').stdout)
@@ -339,8 +339,8 @@ class TeamTest(Base):
         self.session('local_p1', '2026-01-02T11:59:00Z')
         self.session('local_p3', '2026-01-02T11:59:00Z')
         out = self.run_tool('watch', '--once').stdout
-        self.assertIn(f'programmer holds {REPO}#2 but has been quiet since 2026-01-02T11:00:00Z: send the output of '
-                      f'`agentq nudge {REPO}#2 --last 2026-01-02T11:00:00Z` to programmer (local_p2)', out)
+        self.assertIn(f'programmer holds {REPO}#2 but has been quiet since 2026-01-02T11:00:00Z: send this line to '
+                      f'programmer (local_p2): `You hold {REPO}#2', out)
 
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
@@ -406,7 +406,8 @@ class TeamTest(Base):
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 dispatcher: queued for designer.')
         out = self.run_tool('assign', '8', 'programmer').stdout
         self.assertIn('1. set_session_effort for programmer (local_p): max', out)
-        self.assertIn(f'2. send the output of `agentq brief {REPO}#8` to programmer (local_p)', out)
+        self.assertIn(f"2. send this line to programmer (local_p): `Task {REPO}#8 for programmer, from the owner's queue: "
+                      f"run agentq brief {REPO}#8 and act on it.`", out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'prog',
                                                              '--add-label', 'doing'])
         self.data({REPO: {'open': [issue(9, 'Easy one')]}})

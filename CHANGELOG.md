@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.21 – 2026-10-18
+- Fewer tokens in coordination: the dispatcher sends a role one line ("run agentq brief N and act on it") instead of reading and re-sending the whole task; the role reads the task itself, once. Reminders are one line in the plan too.
+
 ## 0.2.20 – 2026-10-18
 - A role may have several sessions (`agentq role <name> --sessions a,b,c`): one label and queue, one task per session. The watcher plans as many tasks as there are free sessions; `assign` picks a free session and records it, so forwarded words, reminders and model or effort changes go to the session that holds the task.
 

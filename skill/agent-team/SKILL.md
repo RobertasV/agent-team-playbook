@@ -20,7 +20,7 @@ Two modes. **Programmer mode**: one task at a time with the role's label; do it,
 
 ## A message from the dispatcher
 
-It is the owner's queue, sent on the owner's setup – not chatter from another session. Act on it. It holds the task verbatim and screenshots as local files; open them when they matter. Finish with exactly one command:
+It is the owner's queue, sent on the owner's setup – not chatter from another session. Act on it. It is one line naming the task and the command to run (`agentq brief N`): run it – it prints the task verbatim with screenshots as local files – and act on it. Finish with exactly one command:
 
 - fixed → commit with `Fixes #N`, then `agentq done N "what changed, how it was checked"`;
 - stuck → `agentq ask N "question"` (the task leaves the queue until the owner answers);

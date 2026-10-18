@@ -11,7 +11,7 @@ agentq is `{{agentq}}`. Run it from this folder; it finds the project's config h
 
 1. Start the watcher with the Bash tool's run_in_background option: `{{agentq}} watch`. Never with `&`, nohup or similar: only a run_in_background command wakes you when it ends. End your turn. The watcher spends no tokens and ends only when there is work.
 2. When it ends, Read its output file first – every time, before you write anything; never assume what it says or that a watcher is still running. It is a plan; do each numbered step in order. When a command prints more numbered steps, do those too:
-   - "send the output of `X` to <role> (<id>)": run X and send its whole output verbatim with SendMessage, `to` = that id (the role's session, not yours). Add nothing.
+   - "send this line to <role> (<id>): `T`": send exactly T with SendMessage, `to` = that id (the role's session, not yours). Add nothing; the role reads the task itself.
    - "set_session_model for <role> (<id>): M" or "set_session_effort for <role> (<id>): E": call that tool with session id <id>.
    - "call get_session for <id>": that session tool (load it with ToolSearch if it is not loaded); pass its isRunning and lastActivityAt to the command the step names.
    - "classify": read `roles.md` here and pick the role whose description, examples, rules and recent lessons fit. If the title says too little, run `{{agentq}} brief N` and look at the screenshots it lists. Unsure → {{default_role}}.

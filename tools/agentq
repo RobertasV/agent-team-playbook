@@ -65,6 +65,8 @@ DEFAULT_TEXTS = {
     'health_error': "the watcher's last poll failed: {error}",
     'nudge': ("You hold {ref} ('{label}'), but your session has been idle since {last}. Continue it, or finish it "
               "now with one command: agentq done / ask / route / wait."),
+    'send_task': "Task {ref} for {role}, from the owner's queue: run agentq brief {ref} and act on it.",
+    'send_news': 'The owner wrote more on {ref}, your task: run agentq brief {ref} --since {since} and act on it.',
     'stalled': ("{role} holds {ref}, but its session ({session}) has been idle since {last} and did not react to a "
                 "reminder at {at}. Open that session and tell it what to do, or say \"release {ref}\" to any team session."),
     'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
@@ -788,15 +790,16 @@ def render_plan(cfg, plan, start):
     for n, (kind, ref, role, title, since, *rest) in enumerate(plan, 1):
         sid = rest[0] if rest else None
         if kind == 'forward':
-            lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send the output of '
-                         f'`{q} brief {ref} --since {since}` to {session_of(role, sid)}.')
+            line = cfg['texts']['send_news'].format(ref=ref, since=since)
+            lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send this line to {session_of(role, sid)}: `{line}`')
         elif kind == 'answered':
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
             lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'nudge':
-            lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send the output of '
-                         f'`{q} nudge {ref} --last {since}` to {session_of(role, sid)}.')
+            line = nudge_text(cfg, ref, since)
+            lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send this line to '
+                         f'{session_of(role, sid)}: `{line}`')
         elif kind == 'held':
             lines.append(f'{n}. {role["role"]} holds {ref}: call get_session for {sid or role["session"]}, then run '
                          f'`{q} held {ref} --running <its isRunning> --last <its lastActivityAt>` and do what it prints.')
@@ -895,7 +898,8 @@ def session_settings(cfg, state, role, issue_labels, batch, sid=None):
 
 def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
     steps = session_settings(cfg, state, role, issue_labels, batch, sid)
-    steps.append(f'send the output of `agentq brief {ref}` to {session_of(role, sid)}')
+    line = cfg['texts']['send_task'].format(ref=ref, role=role['role'])
+    steps.append(f'send this line to {session_of(role, sid)}: `{line}`')
     for n, step in enumerate(steps, 1):
         print(f'{n}. {step}')
 
@@ -1394,7 +1398,7 @@ def cmd_held(cfg, opts):
         nudges[ref] = {'at': iso(moment)}
         save_state(cfg, state)
         print(f"{role['role']} holds {ref} but has been idle since {iso(last)}. Now:")
-        print(f'1. send the output of `agentq nudge {ref} --last {iso(last)}` to {session_of(role, holder_of(state, role, ref))}')
+        print(f'1. send this line to {session_of(role, holder_of(state, role, ref))}: `{nudge_text(cfg, ref, iso(last))}`')
         return
     if moment - parse_time(nudge['at']) >= dt.timedelta(minutes=cfg['escalate_minutes']) and not nudge.get('told'):
         problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=holder_of(state, role, ref) or '-',
@@ -1407,9 +1411,13 @@ def cmd_held(cfg, opts):
     print(f"reminded {role['role']} at {nudge['at']}; waiting – nothing to do.")
 
 
+def nudge_text(cfg, ref, last):
+    return cfg['texts']['nudge'].format(ref=ref, label=cfg['labels']['working'], last=last or 'a while')
+
+
 def cmd_nudge(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
-    print(cfg['texts']['nudge'].format(ref=f'{repo}#{number}', label=cfg['labels']['working'], last=opts.last or 'a while'))
+    print(nudge_text(cfg, f'{repo}#{number}', opts.last))
 
 
 # ---------- setup ----------

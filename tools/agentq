@@ -2495,26 +2495,30 @@ CODEX_WORKER = ('You are the Codex {role} of the agent team in this project (wor
 
 
 def cmd_workers(cfg, opts):
-    """Codex workers: one Codex task per pulling role (or `count` per role). Only the owner can create a Codex task that
-    is listed under the project (New task), so this prints what to paste into each; workers already running on this
-    computer are left out, an archived or deleted one counts as missing."""
+    """Codex workers: one Codex task per pulling role (or `count` per role), listed under the project like Claude's
+    sessions. Prints a title and a first message for each missing one: a Codex task in the app creates them with its
+    create_thread tool (no clicks); elsewhere the owner does it with New task. Workers already running on this computer
+    are left out; an archived or deleted one counts as missing."""
     roles = [r for r in cfg['roles'] if pulls(r)]
     if not roles:
         print('no role takes Codex workers – `agentq team both` (or `agentq role <name> --agent both`) first.')
         return
     host = socket.gethostname()
     have = {w for w, i in load_state(cfg).get('codex', {}).items() if i.get('host') == host and codex_activity(i['thread'])}
-    names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else ''))
+    names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else ''),
+              f"Codex {r['role']}" + (f' {n}' if opts.count > 1 else ''))
              for r in roles for n in range(1, opts.count + 1)]
     missing = [x for x in names if x[1] not in have]
     if not missing:
         print('every role already has its Codex worker; none missing.')
         return
     project = cfg.get('checkout') or os.getcwd()
-    print(f"In the Codex app, in the project {project}, press New task once per worker and send its text:")
-    for role, name in missing:
-        print(f"\n--- {name} ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
-                                                          agentq=shlex_quote(os.path.realpath(__file__))))
+    print(f"Create one Codex task per block below in the project {project}, titled as the block says, with the "
+          f"block's text as its first message. In the Codex app: the create_thread tool (list_projects gives the "
+          f"project's id); otherwise the owner: New task in that project, paste, Send.")
+    for role, name, title in missing:
+        print(f"\n--- {title} ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
+                                                           agentq=shlex_quote(os.path.realpath(__file__))))
 
 
 def cmd_stats(cfg, opts):

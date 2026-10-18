@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.52 – 2026-10-18
+- Codex workers are created like Claude sessions: `agentq codex-workers [count]` lists a title and a first message per missing worker, and a Codex task in the app creates each with its `create_thread` tool – listed under the project, started at once, no clicks (found by a Codex investigation).
+
 ## 0.2.51 – 2026-10-18
 - From the second Codex review: a wake message Codex may have accepted (queued, or no answer in time) is never undone or sent again – only a refused one puts the task back; a quiet Codex worker gets a reminder and the owner is told, but its task is no longer taken away by its rollout file's time alone.
 - `agentq codex-workers` prints the text for each missing Codex worker: only the owner can create a Codex task listed under the project (drafts opened from outside replaced each other).

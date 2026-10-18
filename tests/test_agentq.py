@@ -515,7 +515,8 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.run_tool('team', 'both')
         out = self.run_tool('codex-workers').stdout
-        self.assertIn('press New task once per worker', out)
+        self.assertIn('the create_thread tool', out)
+        self.assertIn('--- Codex programmer ---', out)
         self.assertIn('next programmer --as codex-programmer', out)
         self.assertIn('end your turn', out)
         for role, thread in (('programmer', 't1'), ('designer', 't2'), ('checker', 't3')):
@@ -525,8 +526,8 @@ class TeamTest(Base):
         os.remove(os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02',
                                'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
         out = self.run_tool('codex-workers').stdout
-        self.assertIn('--- codex-designer ---', out)
-        self.assertNotIn('--- codex-programmer ---', out)
+        self.assertIn('--- Codex designer ---', out)
+        self.assertNotIn('--- Codex programmer ---', out)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
         self.data({REPO: {'open': []}})

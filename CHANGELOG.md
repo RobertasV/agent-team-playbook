@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.66 – 2026-10-18
+- `agentq open <role> … -R other/repo` opens a task in a linked project (without labels, naming the role; that project's dispatcher sorts it) – a programmer could not hand the website's marketer a task.
+
 ## 0.2.65 – 2026-10-18
 - Every command accepts `--as <role>` (agents add it out of habit; `agentq checked … --as testuotojas` failed).
 

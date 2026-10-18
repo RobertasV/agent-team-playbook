@@ -1235,6 +1235,15 @@ class LinkTest(Base):
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), f'🤖 programmer: the part for {OTHER} is {OTHER}#12.')
         self.assertEqual(self.calls(['issue', 'edit']), [])
 
+    def test_open_in_a_linked_project_leaves_the_sorting_to_it(self):
+        self.run_tool('link', OTHER, 'the website')
+        self.data({REPO: {'open': []}, OTHER: {'next': 13}})
+        out = self.run_tool('open', 'marketer', 'Launch video page', 'texts and SEO', '-R', OTHER, '--as', 'programmer').stdout
+        self.assertIn(f'{OTHER}#13 opened in the linked project', out)
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertNotIn('--label', made)
+        self.assertIn(f'for the marketer role: texts and SEO', self.body(made))
+
 
 class InitTest(Base):
     def test_init_installs_into_one_project_only(self):

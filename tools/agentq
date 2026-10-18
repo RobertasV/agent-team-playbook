@@ -2003,11 +2003,16 @@ def cmd_move(cfg, opts):
 
 
 def cmd_open(cfg, opts):
-    """A new task for a role in this project (e.g. a finding for the programmer), with the role's label."""
-    role = role_by_name(cfg, opts.role)
+    """A new task for a role in this project (e.g. a finding for the programmer), with the role's label. In a
+    linked project: the task without labels, naming the role – that project's dispatcher sorts it."""
     repo = opts.repo or cfg['repos'][0]
     if repo not in cfg['repos']:
-        raise Fail(f'{repo} is not in this config')
+        linked(cfg, repo)
+        number = create_issue(repo, opts.title, f"🤖 {opts.who or cfg['role']} ({cfg['repos'][0]}), for the "
+                                                f"{opts.role} role: {opts.text}", [])
+        print(f"{repo}#{number} opened in the linked project; its dispatcher gives it to {opts.role}")
+        return
+    role = role_by_name(cfg, opts.role)
     number = create_issue(repo, opts.title, f"🤖 {opts.who or cfg['role']}: {opts.text}", [role['label']])
     print(f"{repo}#{number} opened for {role['role']}")
 

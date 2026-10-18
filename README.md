@@ -5,9 +5,9 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 ## What you get
 
 - **You only write issues.** No labels, no states, no copying text between chats. Comment on an issue and your words reach the session working on it.
-- **Low token use while idle.** A script watches the board every minute and spends no tokens. The cheapest model (the dispatcher) wakes only when there is work, routes it and goes back to sleep.
+- **Low token use while idle.** A script watches the board every minute and spends no tokens. A mid model (the dispatcher) wakes only when there is work, routes it and goes back to sleep.
 - **One task per session at a time.** Busy is read from the board, so a session never gets a second task while it works on one. A role may have several sessions (e.g. five programmers); each free one gets the next task.
-- **Strong where it counts, cheap where it doesn't.** Every role works on the strongest model at extra-high effort (*hard* issues: the highest). Only the dispatcher, which just routes, runs on the cheapest.
+- **Strong where it counts, cheap where it doesn't.** Every role works on the strongest model at extra-high effort (*hard* issues: the highest). Only the dispatcher, which just routes, runs on a mid model at low effort.
 - **Checks in batches, not after every task.** A checker wakes after N finished tasks (or 24 h) and turns each problem into a new issue linked to the original.
 - **It learns where tasks belong.** When a session gets a task that isn't its own, routing it on teaches the dispatcher. Your rules always outrank the agents' rules.
 - **Your words are never lost or reworded.** The dispatcher passes them on verbatim, with screenshots downloaded, even from private repositories.
@@ -22,7 +22,7 @@ A small team of AI agent sessions (Claude Code) that works for one human – the
 owner ──writes──▶ GitHub issues ◀──polls every minute, no tokens── agentq watch
                                                                        │ work found: prints a plan, exits
                                                                        ▼
-                                   dispatcher session (cheapest model, own small folder)
+                                   dispatcher session (mid model, own small folder)  
                                      classify → agentq assign → agentq brief → send to the role's session
                                                                        │
              ┌─────────────────────────────┬───────────────────────────┴───────────┐

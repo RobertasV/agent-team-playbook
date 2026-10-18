@@ -8,11 +8,11 @@ Three core roles exist in every project:
 
 | Role | Model | Effort | Job |
 |---|---|---|---|
-| Dispatcher | cheapest | lowest | Watches the board through a script and sends tasks. Never codes, never interprets the owner's words. |
+| Dispatcher | mid (e.g. Sonnet) | low | Watches the board through a script and sends tasks. Never codes, never interprets the owner's words. |
 | Programmer | strongest | extra high (issues labelled *hard*: highest) | Default role: every task nobody else owns. The only role that interprets the owner's words. |
 | Checker | strongest | extra high | Checks batches of finished tasks. The full release check runs only on the owner's word. |
 
-Every role, the marketer and owner-defined roles included, runs on the strongest model at extra-high effort (the owner's word, 2026-10-17); only the dispatcher runs on the cheapest.
+Every role, the marketer and owner-defined roles included, runs on the strongest model at extra-high effort (the owner's word, 2026-10-17); only the dispatcher runs on a mid model at low effort. It started on the cheapest; that one kept doubting the plan's session ids instead of following it, so the owner moved it to a mid model (2026-10-18). It wakes rarely, so this costs little.
 
 The owner is not a role: everyone works for them.
 

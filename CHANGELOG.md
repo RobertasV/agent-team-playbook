@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.26 – 2026-10-18
+- The dispatcher runs on a mid model (e.g. Sonnet) at low effort instead of the cheapest: the cheapest kept doubting the plan's session ids instead of following it (the owner's word). It wakes only when there is work, so the cost stays small.
+
 ## 0.2.25 – 2026-10-18
 - `gh` calls retry twice on a 502/503/504 or a timeout.
 - A plan says "(agentq checked: it exists)" for a session the desktop app knows; the dispatcher never checks ids against list_sessions or linked-session notes.

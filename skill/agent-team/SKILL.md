@@ -1,6 +1,6 @@
 ---
 name: agent-team
-description: How a small team of AI agent sessions works for one human owner on GitHub issues – a cheap dispatcher sends tasks, role sessions do them and finish with one agentq command. Load it when a message from the dispatcher arrives, when you finish, route or split a task, write on GitHub, teach the dispatcher a rule, or when the owner asks to install or extend the team in this project.
+description: How a small team of AI agent sessions works for one human owner on GitHub issues – a dispatcher sends tasks, role sessions do them and finish with one agentq command. Load it when a message from the dispatcher arrives, when you finish, route or split a task, write on GitHub, teach the dispatcher a rule, or when the owner asks to install or extend the team in this project.
 ---
 
 # Agent team
@@ -10,7 +10,7 @@ Applies only in a project that has `.agentq.json` (installed per project). `agen
 ## Roles
 
 - **Owner** – the human everyone works for. Writes in plain words, in chat or on issues. Never touches labels.
-- **Dispatcher** – the cheapest model, own small folder. Its watcher reads the board every minute without tokens; it sends tasks. Never codes, never interprets the owner's words.
+- **Dispatcher** – a mid model (e.g. Sonnet) at low effort, own small folder. Its watcher reads the board every minute without tokens; it sends tasks. Never codes, never interprets the owner's words.
 - **Programmer** – the default role: every task nobody else owns. The only role that interprets the owner's words.
 - **Checker** – checks batches of finished tasks. The full release check runs only on the owner's word.
 - **Marketer** (optional) – posts, ads, campaigns. Anything public or paid only on the owner's word.
@@ -70,7 +70,7 @@ Only when the owner asks for it in words in this project. A session never starts
 2. Labels: the passing `agentq setup` creates them (working, question, deferred, waiting, priority, blocking, hard, waits for owner's word, each role, each checker's `checked: <role>`), with the dispatcher folder.
 3. Sort the open issues: `agentq assign N <role> --queue` (label only), `agentq defer N "…"`. Unclear ones go to the owner as one list.
 4. Config: the roles table (`agentq roles`; change a role with `agentq role <name> …`).
-5. Sessions: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (cheapest model, low effort, prompt "Read CLAUDE.md and start the loop"); every other session on the strongest model at `xhigh`; the dispatcher's folder is outside the project because a project subfolder would still load the project's CLAUDE.md and rules. Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
+5. Sessions: you are the programmer (`agentq role programmer --session <your id>`). Start the checker session in this project and the dispatcher session in the dispatcher folder (mid model such as Sonnet, low effort, prompt "Read CLAUDE.md and start the loop"); every other session on the strongest model at `xhigh`; the dispatcher's folder is outside the project because a project subfolder would still load the project's CLAUDE.md and rules. Record them: `agentq role checker --session <id>`, `agentq role dispatcher --session <id>`. The app asks the owner to approve each new session once. All team sessions run in the same permission mode, or messages wait for approval.
    Then put every team session (yours included) into one sidebar group named after the project, e.g. "<project> team" in the config's language: reuse a group with that name or create it (`create_group`), then `move_sessions`. Record it: `agentq setup --group <group id>`, so a re-run puts recreated sessions into it.
 6. The dispatcher starts the watcher itself. Add an hourly health timer (launchd or cron): `<package>/tools/agentq --config <config> health` – no tokens; problems go to one issue for the owner.
 7. Ask: "Turn on the marketer?" Yes → start its session, `agentq role marketer --session <id>`. No → the programmer does marketing tasks.
@@ -81,6 +81,6 @@ Only when the owner asks for it in words in this project. A session never starts
 The owner says e.g. "10 programmers" → `agentq scale <role> 10` and do what it prints: start each missing session with the printed number in its title (the owner asked, so start them yourself), move it into the team's sidebar group, record it with `agentq role <role> --add-session <id>`. Fewer ("3 programmers") → `agentq scale <role> 3`: the rest get no new tasks and finish what they hold. Never archive or delete them: the next "more" reuses them first (unarchive one if the owner archived it).
 9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
-Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on the cheapest. Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
+Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
 
 Re-running install creates nothing that exists: `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".

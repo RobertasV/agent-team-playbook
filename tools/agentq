@@ -117,6 +117,9 @@ DEFAULT_TEXTS = {
                    'command costs a model call every minute. agentq sends this task a message when there is work.'),
     'wake_task': ('Task {ref} for {role} is yours now (worker {worker}): run `{agentq} brief {ref}` and act on it. '
                   'Finish it with one command, then run `{next}`.'),
+    'live': ("The owner's running copy: when your check says GO, restart it on {target} with `{command}` ({{sha}} = "
+             "that commit). Only you restart it, and never on a red or unchecked commit."),
+    'live_other': "Never restart the owner's running copy of the program: {role} does that after a check says GO.",
     'codex_unreached': 'back in the queue: its Codex worker ({worker}) could not be reached ({error}).',
     'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new task that links '
                      'the original (`agentq open <role> "title" "From the check of #N: …"`); never reopen the original.\n'
@@ -1734,6 +1737,14 @@ def cmd_brief(cfg, opts):
         if not batch and role['mode'] == 'programmer':
             out.append(texts['tests_batched' if cfg['tests']['mode'] == 'batched' else 'tests_per_task']
                        .format(every=cfg['tests']['every']))
+        live = cfg.get('live') or {}
+        if live.get('command'):  # the owner's running copy: one role restarts it, nobody else
+            if role['role'].lower() == live['role'].lower():
+                green = load_state(cfg).get('tests', {}).get('green') if cfg['tests']['mode'] == 'batched' else None
+                target = f'the last green commit, {green}' if green else 'the commit you checked'
+                out.append(texts['live'].format(command=live['command'], target=target))
+            else:
+                out.append(texts['live_other'].format(role=live['role']))
         out.append(texts['after'].format(role=role['role']))
     print('\n'.join(out))
 
@@ -2502,6 +2513,23 @@ def cmd_stats(cfg, opts):
         print(f'{team} | {len(hours)} | {median} | {found[team]}')
 
 
+def cmd_live(cfg, opts):
+    """The owner's running copy of the program: which role restarts it after a check says GO, and with what command
+    ({sha} = the commit). None: nothing is restarted – e.g. the program runs on another machine, or not at all."""
+    if opts.off or opts.role:
+        def change(raw):
+            if opts.off:
+                raw.pop('live', None)
+            elif not opts.command:
+                raise Fail('give the restart command too, e.g. agentq live checker "~/bin/restart.sh {sha}"')
+            else:
+                raw['live'] = {'role': role_by_name(cfg, opts.role)['role'], 'command': opts.command}
+        cfg = save_config(cfg, change)
+    live = cfg.get('live') or {}
+    print(f"the owner's running copy: {live['role']} restarts it after GO with `{live['command']}`" if live.get('command')
+          else "the owner's running copy: none – nothing is restarted")
+
+
 def cmd_role(cfg, opts):
     """Add or change a role (or the dispatcher's session) in the config, then create its labels."""
     name = opts.name.strip()
@@ -2691,6 +2719,10 @@ def main(argv=None):
     st.add_argument('--days', type=float, default=30)
     cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')
     cw.add_argument('count', type=int, nargs='?', default=1, help='workers per role (default 1)')
+    lv = sub.add_parser('live', help="which role restarts the owner's running copy after GO, and how (--off: none)")
+    lv.add_argument('role', nargs='?')
+    lv.add_argument('command', nargs='?', help='the restart command; {sha} is the commit')
+    lv.add_argument('--off', action='store_true')
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
     tm.add_argument('agent', choices=('claude', 'codex', 'both'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
@@ -2720,7 +2752,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'live': cmd_live, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         code = commands[opts.cmd](cfg, opts) or 0

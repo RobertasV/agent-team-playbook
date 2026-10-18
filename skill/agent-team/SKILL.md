@@ -87,11 +87,17 @@ Only when the owner asks for it in words in this project – one line is enough,
 7. Ask: "Turn on the marketer?" Yes → `agentq role marketer`, then in Claude start its session and record `--session <id>` (in Codex it needs no session: a worker pulls its tasks). No → the programmer does marketing tasks.
 8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; in Claude start its session and record `--session` (in Codex nothing more). If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no. Several sessions doing the same job are one role with a pool, never a second role per extra session.
 
-9. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
+9. Ask: "Does a copy of the program run on this computer that should follow the checked version? Who restarts it, with what command?" Yes → `agentq live <role> "<command with {sha}>"` (usually the checker: it restarts only after GO, on the last green commit; nobody else restarts it). No – it runs on another machine, a server deploys itself, or nothing runs – skip; `agentq live --off` turns it off later.
+
+10. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
 Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
 
 Re-running install creates nothing that exists (but an install run in Codex still does the Codex part of step 5): `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".
+
+## The owner's running copy
+
+When `agentq live` names a role, that role restarts the owner's running copy of the program after a check says GO, on the last green commit (the brief says which and with what command); every other role never restarts it. Without it nothing is restarted.
 
 ## Test mode
 

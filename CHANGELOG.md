@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.46 – 2026-10-18
+- `agentq live <role> "<command {sha}>"`: one role (usually the checker) restarts the owner's running copy after a check says GO, on the last green commit; every other role's brief says never to restart it. Off by default and with `--off` – for a program that runs on another machine or deploys itself. The install asks about it.
+
 ## 0.2.45 – 2026-10-18
 - A Codex task never waits in a command: Codex checks a running command with a model call every minute (one worker waiting 45 minutes cost 17M input tokens). A Codex worker with no task ends its turn; the watcher claims its next task and queues one message for it (`codex queue`; an unloaded task is opened in the background). Reminders for a quiet Codex worker go the same way. A Codex dispatcher's watcher runs on its own and sends each plan as a message.
 - Claude sessions and Codex workers waiting for the same role take turns.

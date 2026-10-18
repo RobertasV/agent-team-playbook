@@ -662,6 +662,18 @@ class TeamTest(Base):
         self.assertEqual(tool.merged(base, ours, disk), {'holders': {'a#1': 'w1', 'a#5': 'w5', 'a#9': 'w9'},
                                                          'watch': {'beat': 2}, 'paused': {'why': 'stop'}})
 
+    def test_one_role_restarts_the_owners_running_copy(self):
+        self.data({REPO: {'open': [], 'labels': []}})
+        self.assertIn('none – nothing is restarted', self.run_tool('live').stdout)
+        self.assertIn('checker restarts it after GO', self.run_tool('live', 'checker', '~/bin/restart.sh {sha}').stdout)
+        api = {f'repos/{REPO}/issues/{n}': {'title': 't', 'body': b, 'labels': [{'name': l}], 'user': {'login': 'boss'}}
+               for n, b, l in ((7, 'x', 'prog'), (9, 'Check: #7\n<!-- agentq:batch {"role": "checker", "issues": [7]} -->', 'check'))}
+        self.data({REPO: {'open': []}, 'api': api})
+        self.assertIn('restart it on the commit you checked with `~/bin/restart.sh {sha}`', self.run_tool('brief', '9').stdout)
+        self.assertIn("Never restart the owner's running copy of the program: checker does", self.run_tool('brief', '7').stdout)
+        self.run_tool('live', '--off')
+        self.assertNotIn('running copy', self.run_tool('brief', '7').stdout)
+
     def test_stats_compare_the_teams(self):
         claim = '\n<!-- agentq:claim h/x/1 -->'
         def done(n, team, taken, closed):

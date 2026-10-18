@@ -44,7 +44,7 @@ class Base(unittest.TestCase):
             json.dump({
                 'owner_accounts': ['boss'], 'agent_account': 'bot', 'role': 'programmer', 'repos': [REPO],
                 'labels': {'working': 'doing', 'question': 'ask owner', 'deferred': 'later', 'waiting': 'waits'},
-                'skip_labels': ['after launch'],
+                'skip_labels': ['after launch'], 'disk_min_gb': 0,
             }, f)
         self.data({})
 
@@ -1076,6 +1076,15 @@ class TeamTest(Base):
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 designer: fixed the colour; checked on a phone')
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'])
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '7', '-R', REPO])
+
+    def test_health_warns_when_the_disk_is_nearly_full(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['disk_min_gb'] = 10 ** 9  # more than any disk has
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.data({REPO: {'open': [], 'next': 60}})
+        self.assertIn('GB free on this computer', self.run_tool('health').stdout)
 
     def test_health_reports_to_one_issue_and_closes_it_when_well(self):
         stale = issue(7, 'Stuck', ['prog', 'doing'], updated='2026-01-01T00:00:00Z')

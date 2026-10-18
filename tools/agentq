@@ -67,6 +67,8 @@ DEFAULT_TEXTS = {
     'checked': 'checked {refs}. {text}',
     'health_title': 'Agent team health',
     'health_ok': 'all well again.',
+    'health_disk': ('only {free} GB free on this computer (below {limit} GB): builds, tests and copies will soon fail. '
+                    'Look for old scratch copies, worktrees and caches.'),
     'health_moved': '{refs}: not stuck any more (finished, or taken again) – nothing for you to do.',
     'health_watch': 'the watcher is not running (last poll: {since}) – the dispatcher sends no tasks. Re-run setup.',
     'health_stuck': 'the watcher has not polled since {since}.',
@@ -111,7 +113,9 @@ DEFAULT_TEXTS = {
     'split': 'the part for {repo} is {other}.',
     'split_from': 'Split from {ref}.',
     'after': ('Never message other sessions and never offer to take part of a task someone else holds: the board '
-              'carries everything. When you have finished, get your next task with `agentq next {role}` – in Claude '
+              'carries everything. Before you finish, delete what you made for this task outside the project – scratch '
+              'copies, test checkouts, worktrees, build output – keeping only what the owner needs to see; never delete '
+              'anything you did not make. When you have finished, get your next task with `agentq next {role}` – in Claude '
               'add --wait and run it with run_in_background (it wakes you when there is one); in Codex run it as it is, '
               'and when it says there is none, end your turn (a message wakes you).'),
     'codex_idle': ('No task now. End your turn here: do not wait, poll or run anything else – in Codex a waiting '
@@ -286,6 +290,7 @@ def load_config(path):
     cfg['forward_hours'] = cfg.get('forward_hours', 24)
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
+    cfg['disk_min_gb'] = cfg.get('disk_min_gb', 30)
     cfg['clear_every'] = cfg.get('clear_every', 0)
     cfg['priority_words'] = cfg.get('priority_words') or [cfg['labels']['priority']]  # off: after a clear a watcher started before it wakes nobody
     tests = {'mode': 'per-task', 'full': '', 'every': 5, 'checkout': '', 'branch': 'main', 'timeout_minutes': 60,
@@ -2170,6 +2175,10 @@ def cmd_health(cfg, opts):
     if beat.get('error'):
         problems.append(texts['health_error'].format(error=beat['error']))
     stale = dt.timedelta(hours=cfg['stale_hours'])
+    disk = os.statvfs(os.path.dirname(cfg['state_file']) or '.')
+    free = disk.f_bavail * disk.f_frsize / 1e9
+    if cfg['disk_min_gb'] and free < cfg['disk_min_gb']:
+        problems.append(texts['health_disk'].format(free=f'{free:.0f}', limit=cfg['disk_min_gb']))
     for repo in cfg['repos']:
         for issue in board(repo):
             if cfg['labels']['working'] in labels_of(issue) and moment - parse_time(issue['updatedAt']) > stale:

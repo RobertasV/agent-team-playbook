@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.64 – 2026-10-18
+- Workers clean up: every brief and the skill say to delete what was made for the task outside the project (scratch copies, test checkouts, worktrees, build output) before finishing, never anything else.
+- The hourly health check reports when free disk space falls below `disk_min_gb` (default 30 GB).
+
 ## 0.2.63 – 2026-10-18
 - One health issue, even when two problems are reported in the same minute (GitHub's list did not show the issue created a moment before, so a second one was opened).
 

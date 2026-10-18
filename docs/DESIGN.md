@@ -53,9 +53,9 @@ A role may have several sessions (a pool, e.g. five programmers): one label, one
 
 Busy is read from the board, so a role never gets a second task while it works on one. A direct chat between the owner and a session is not on the board; a task message then waits until the session answers the owner.
 
-## Agents outside the desktop app
+## Claude and Codex
 
-Decided by the owner on 2026-10-18. A role marked `agent: codex` (or any non-Claude agent) pulls instead of being sent tasks: `agentq next <role> --wait` takes its next task (priority → blocking → oldest; a checker-mode role gets its batch) and prints the brief. The watcher plans nothing for it, `assign` only queues for it, and new owner words reach it through `agentq done`, which shows unanswered words instead of closing. Session reminders and model switches stay Claude-only.
+Decided by the owner on 2026-10-18: Claude and Codex each have their own workers for the same roles and compete for the same tasks; the owner shifts the work to whichever has tokens left (`agentq team claude|codex|both`). A role's agent is claude (the dispatcher sends to its sessions), codex (its workers pull with `agentq next`) or both. Claims keep two workers from taking one task; a task a Codex worker holds does not count against the Claude sessions' capacity, and its new owner words reach it through `agentq done`. The dispatcher keeps running in every mode; Codex worker tasks are opened prefilled (`agentq codex-workers`) and started by the owner.
 
 ## Many computers
 

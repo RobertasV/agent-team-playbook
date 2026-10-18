@@ -484,17 +484,32 @@ class TeamTest(Base):
                                                        'user': {'login': 'boss'}}}})
         self.assertIn(f'{REPO}#9 is yours now (w1).', self.run_tool('next', '--as', 'w1').stdout)
 
-    def test_codex_workers_are_opened_once_each(self):
+    def test_codex_workers_one_per_role_opened_once(self):
         bridge = os.path.join(self.dir.name, 'bin', 'codex-bridge')
         with open(bridge, 'w') as f:
             f.write(f'#!/bin/sh\necho "$@" >> {self.dir.name}/bridge.log\n')
         os.chmod(bridge, 0o755)
-        self.assertIn('2 Codex task(s) opened', self.run_tool('codex-workers', '2').stdout)
-        self.assertIn('codex-3', self.run_tool('codex-workers', '3').stdout)
+        self.data({REPO: {'open': []}})
+        self.run_tool('team', 'both')
+        self.assertIn('3 Codex task(s) opened', self.run_tool('codex-workers').stdout)
+        self.assertIn('none missing', self.run_tool('codex-workers').stdout)
         log = open(os.path.join(self.dir.name, 'bridge.log')).read()
-        self.assertEqual([w for w in ('codex-1', 'codex-2', 'codex-3') if f'--as {w}' in log], ['codex-1', 'codex-2', 'codex-3'])
+        self.assertIn('next programmer --wait --as codex-programmer', log)
         self.assertEqual(log.count('new --draft'), 3)
-        self.assertIn('none missing', self.run_tool('codex-workers', '2').stdout)
+
+    def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
+        self.data({REPO: {'open': []}})
+        self.run_tool('team', 'both')
+        board = {REPO: {'open': [issue(7, 'Icon', ['prog']), issue(8, 'Logo', ['prog'])]},
+                 'api': {f'repos/{REPO}/issues/{n}': {'title': 't', 'body': 'x', 'labels': [{'name': 'prog'}],
+                                                       'user': {'login': 'boss'}} for n in (7, 8)}}
+        self.data(board)
+        self.assertIn(f'{REPO}#7 is yours now (codex-programmer).', self.run_tool('next', 'programmer', '--as', 'codex-programmer').stdout)
+        board[REPO]['open'][0]['labels'].append({'name': 'doing'})
+        self.data(board)
+        out = self.run_tool('watch', '--once').stdout  # the Codex worker's task does not make the Claude session busy
+        self.assertIn(f'next task for programmer: run `agentq assign {REPO}#8 programmer`', out)
+        self.assertIn('send this line to session local_p', self.run_tool('assign', '8', 'programmer').stdout)
 
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},
@@ -525,25 +540,22 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now=T2)
         self.assertEqual(len([c for c in self.calls(['issue', 'edit']) if 'priority' in c]), 2)  # once per issue
 
-    def test_team_moves_dispatcher_and_roles_and_the_other_dispatcher_stops(self):
-        self.data({REPO: {'open': []}})
-        out = self.run_tool('team', 'codex').stdout
-        self.assertIn('the team runs on codex now', out)
-        self.assertIn('"Read AGENTS.md and start the loop."', out)
+    def test_team_moves_the_work_between_claude_and_codex(self):
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
+        self.assertIn('Codex works every role now', self.run_tool('team', 'codex').stdout)
         with open(self.config) as f:
             cfg = json.load(f)
-        self.assertEqual({r['agent'] for r in cfg['roles']} | {cfg['dispatcher']['agent']}, {'codex'})
+        self.assertEqual({r['agent'] for r in cfg['roles']}, {'codex'})
+        self.assertEqual(cfg['dispatcher']['agent'], 'both')
         claude = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
                                 text=True, env={**self.env(), 'CLAUDECODE': '1'})
-        self.assertIn('runs on codex now – stop this loop', claude.stdout)
-        codex = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
-                               text=True, env={**self.env(), 'CODEX_THREAD_ID': 't1'})
-        self.assertIn('no work', codex.stdout)
-        self.assertIn('send the Claude dispatcher', self.run_tool('team', 'claude').stdout)
+        self.assertNotIn('assign', claude.stdout)  # Claude sessions get no tasks; the dispatcher still runs
+        self.assertIn('Claude works every role now', self.run_tool('team', 'claude').stdout)
+        self.assertIn('Stop this loop.', self.run_tool('next', 'designer', ok=False).stdout)
 
     def test_claude_and_codex_dispatchers_side_by_side(self):
         self.data({REPO: {'open': []}})
-        self.assertIn('side by side', self.run_tool('team', 'both').stdout)
+        self.assertIn('both work every role', self.run_tool('team', 'both').stdout)
         import fcntl
         with open(self.config + '.state.json.watch.claude.lock', 'a') as lock:  # a Claude watcher runs
             fcntl.flock(lock, fcntl.LOCK_EX)
@@ -641,7 +653,7 @@ class TeamTest(Base):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(4, 'Icon', ['ask owner']),
                                    issue(8, 'Hard one', ['hard']), issue(9, 'Easy one')]}})
         out = self.run_tool('assign', '4', 'designer').stdout
-        self.assertIn('queued (designer works on #3)', out)
+        self.assertIn('queued (its sessions work on #3)', out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1],
                          ['issue', 'edit', '4', '-R', REPO, '--add-label', 'design', '--remove-label', 'ask owner'])
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 dispatcher: queued for designer.')

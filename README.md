@@ -41,13 +41,9 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 - The Claude desktop app (Code tab). Sessions message each other, and a finished background command wakes a session.
 - A separate GitHub account for the agents (the "AI account"). GitHub allows one free machine account per person. Invite it to your project with **Write** access, not Admin.
 
-## Codex and other agents
+## Claude and Codex
 
-A role may run in Codex or another agent instead of a Claude session: `agentq role <name> --agent codex`. The dispatcher then sends it nothing; the agent loops on `agentq next <role> --wait` (waits without tokens, prints the next task), does the task and finishes it with the usual commands. `agentq init --codex` points the project's AGENTS.md at the skill. `agentq team codex` moves the whole team, dispatcher included: the dispatcher folder has an AGENTS.md for a Codex dispatcher, and the Claude dispatcher stops by itself; `agentq team claude` moves it back. Reminders for quiet sessions and per-task model switches are Claude-only; the hourly health check still reports a task that stops moving.
-
-## Many computers
-
-One dispatcher per project is enough: it only sorts new tasks into roles. Several may run too (`agentq team both` lets a Claude and a Codex dispatcher work side by side): claims keep them from sharing a task, words are forwarded only by the computer that holds the task, a stale-PR task is opened once, and the full test suite runs on the computer named in `tests.host`. Workers can run on any number of computers: each pulls with `agentq next <role> --wait` (or is a Claude session the dispatcher sends to). Taking a task is safe across computers: the taker posts a claim, reads the comments back, and only the earliest claim of the last ten minutes wins – a loser deletes its claim and takes the next task. GitHub is the only shared state, so every computer needs `gh` signed in as the AI account and the project's config.
+Every role can be worked by Claude sessions, by Codex workers, or by both at once – they compete for the same tasks, and claims keep two from taking one. Move the work to whichever has tokens left: `agentq team codex` (Claude off), `agentq team claude` (Codex off), `agentq team both`. `agentq codex-workers` opens one prefilled Codex task per role in the Codex app; press Send on each. A Codex worker loops on `agentq next <role> --wait` (waits without tokens), does the task and finishes it with the usual commands. Reminders for quiet sessions and per-task model switches are Claude-only.
 
 ## Install into a project
 

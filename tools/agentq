@@ -356,7 +356,19 @@ def session_of(role, sid=None):
 
 
 def pulls(role):
+    """Its workers take tasks themselves (`agentq next`): codex, or both (Claude sessions and Codex workers compete)."""
     return role.get('agent', 'claude') != 'claude'
+
+
+def pushes(role):
+    """The dispatcher sends tasks to its Claude sessions: claude, or both."""
+    return role.get('agent', 'claude') in ('claude', 'both')
+
+
+def session_held(state, role, repo, issues):
+    """The tasks this role's Claude sessions hold – not those a Codex worker took."""
+    holders = state.get('holders', {})
+    return [i for i in issues if holders.get(f"{repo}#{i['number']}") in (None, *role['sessions'])]
 
 
 def capacity(role):
@@ -739,8 +751,9 @@ def check_held(cfg, state, repo, issues, start, plan):
         for issue in busy_with(cfg, issues, role):
             ref = f"{repo}#{issue['number']}"
             held.add(ref)
-            if pulls(role):
-                continue  # no desktop-app session to watch; health reports a task that stops moving
+            holder = state.get('holders', {}).get(ref)
+            if not pushes(role) or (holder and holder not in role['sessions']):
+                continue  # a pulling worker holds it: no desktop-app session to watch; health reports a stuck task
             sid = holder_of(state, role, ref)
             if not sid:
                 continue
@@ -936,8 +949,9 @@ def build_plan(cfg, state, start):
                 taken.add(role['role'])
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 role = role or default_role(cfg)
-                if pulls(role):
-                    continue  # it reads new words when it runs `agentq done`
+                holder = state.get('holders', {}).get(ref)
+                if not pushes(role) or (holder and holder not in role['sessions']):
+                    continue  # a pulling worker reads new words when it runs `agentq done`
                 claims = [m.group(1) for c in item.get('comments', []) for m in [CLAIM_MARK.search(c.get('body') or '')] if m]
                 if claims and claims[-1].split('/')[0] != socket.gethostname():
                     continue  # another computer's dispatcher holds this task and forwards the words
@@ -948,9 +962,9 @@ def build_plan(cfg, state, start):
         check_tests(cfg, state, repo, start, plan)
         cache = {}
         for role in cfg['roles']:
-            if pulls(role):
-                continue  # it takes its own tasks with `agentq next`
-            slots = capacity(role) - len(busy_with(cfg, issues, role)) - (role['role'] in taken)
+            if not pushes(role):
+                continue  # its workers take their own tasks with `agentq next`
+            slots = capacity(role) - len(session_held(state, role, repo, busy_with(cfg, issues, role))) - (role['role'] in taken)
             picked = []
             while slots > 0:
                 issue = next_issue(cfg, issues, role, picked)
@@ -959,7 +973,7 @@ def build_plan(cfg, state, start):
                 picked.append(issue['number'])
                 plan.append(('assign', f"{repo}#{issue['number']}", role, issue['title'], None))
                 slots -= 1
-            if slots > 0 and role['mode'] == 'checker' and not busy_with(cfg, issues, role) and \
+            if slots > 0 and role['mode'] == 'checker' and not busy_with(cfg, issues, role) and role['sessions'] and \
                     batch_ready(cfg, role, unchecked(cfg, state, repo, role, cache), start):
                 plan.append(('batch', repo, role, None, None))
         skip = cfg['skip'] | {labels['working'], labels['batch']}
@@ -1175,7 +1189,7 @@ def cmd_next(cfg, opts):
                               f'its task again:')
                         cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
                         return 0
-                    if role['pool'] and len(held) >= capacity(role):
+                    if not pushes(role) and role['pool'] and len(held) >= capacity(role):
                         continue
                     picked = []
                     while True:  # this role's queue, in its order
@@ -1229,16 +1243,17 @@ def cmd_assign(cfg, opts):
     remove += [n for n in {labels['question'], labels['owner_word']} if n in names]  # the owner answered
     state = load_state(cfg)
     who = cfg['dispatcher']['name']
-    if pulls(role):
+    if not pushes(role):
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, in its queue; it takes its tasks itself (agentq next). Nothing to send.")
         return
-    busy = busy_with(cfg, real_board(cfg, state, repo), role, but=number)
-    if len(busy) >= capacity(role):
+    busy = session_held(state, role, repo, busy_with(cfg, real_board(cfg, state, repo), role, but=number))
+    if len(busy) >= capacity(role) or not role['sessions']:
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
-        print(f"{ref} → {role['role']}, queued ({role['role']} works on #{busy[0]['number']}). Nothing to send.")
+        why = f"its sessions work on #{busy[0]['number']}" if busy else 'no Claude session'
+        print(f"{ref} → {role['role']}, queued ({why}). Nothing to send.")
         return
     if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who):
         print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
@@ -2012,56 +2027,57 @@ def cmd_tests(cfg, opts):
 
 
 def cmd_team(cfg, opts):
-    """Move the whole team – dispatcher and every role – to Claude or to another agent such as codex."""
+    """Who works the roles: claude (Codex off), codex (Claude off) or both (they compete for tasks). The owner moves work
+    to whichever has tokens left. The dispatcher keeps running either way: it only sorts tasks, on Claude or Codex."""
     def change(raw):
-        raw.setdefault('dispatcher', {})['agent'] = opts.agent
-        if opts.agent != 'both':  # both: each role keeps its own agent
-            for r in raw.setdefault('roles', [{**x, 'session': ''} for x in DEFAULT_ROLES]):
-                r['agent'] = opts.agent
+        raw.setdefault('dispatcher', {})['agent'] = 'both'
+        for r in raw.setdefault('roles', [{**x, 'session': ''} for x in DEFAULT_ROLES]):
+            r['agent'] = opts.agent
     cfg = save_config(cfg, change)
-    folder = cfg['dispatcher']['folder'] or '<the dispatcher folder>'
-    if opts.agent == 'both':
-        print('a Claude and a Codex dispatcher may now run side by side; claims keep them from sharing a task. '
-              'Roles keep their own agent (agentq role <name> --agent claude|codex).')
-        return
-    print(f'the team runs on {opts.agent} now; the other dispatcher stops at its next watch.')
     if opts.agent == 'claude':
-        print(f"Now: send the Claude dispatcher ({cfg['dispatcher']['session'] or 'no session id'}) \"Start the watcher\"; "
-              f"the codex tasks stop by themselves (their next agentq call tells them to).")
+        print('Claude works every role now; Codex workers stop at their next agentq call. '
+              f"If the Claude dispatcher is not running, send it ({cfg['dispatcher']['session'] or 'no session id'}) "
+              '"Start the watcher".')
+    elif opts.agent == 'codex':
+        print('Codex works every role now; Claude sessions get no new tasks (they finish what they hold). '
+              'Codex workers: `agentq codex-workers` opens one per role. The dispatcher keeps sorting tasks '
+              '(Claude, or a Codex task in its folder: "Read AGENTS.md and start the loop").')
     else:
-        print(f'Now, in {opts.agent}: 1. a task in {folder}: "Read AGENTS.md and start the loop." '
-              f'2. one task per role worker, in the project folder: "Loop: agentq next <role> --wait --as {opts.agent}-1, '
-              f'do the task, finish it with one agentq command, repeat."')
-        for r in cfg['roles']:
-            print(f"   - {r['role']}: {max(1, len(r['pool']))} worker(s)")
+        print('Claude and Codex now both work every role: the dispatcher sends tasks to free Claude sessions, Codex '
+              'workers take the rest (`agentq codex-workers` opens one per role); claims keep them from sharing a task.')
 
 
 def cmd_workers(cfg, opts):
-    """Codex workers for the whole team: open the missing prefilled Codex tasks in the project (the owner presses Send)."""
+    """Codex workers: one prefilled Codex task per pulling role (or `count` per role), opened in the Codex app where
+    codex-bridge exists – the owner presses Send. Opened ones are remembered, so a repeat opens only the missing."""
     state = load_state(cfg)
-    have = int(state.get('codex_workers', 0))
+    have = state.setdefault('codex_opened', {})
     project = cfg.get('checkout') or os.getcwd()
-    text = ('Join the agent team in this project as worker {name}: read the skill AGENTS.md points to (section '
-            '"Codex and other agents"), then loop without stopping: {agentq} next --wait --as {name} → do the task by the '
-            'skill → finish it with one agentq command → again. No progress reports to the owner.')
     bridge = shutil_which('codex-bridge')
+    text = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md points '
+            'to (section "Codex and other agents"), then loop without stopping: {agentq} next {role} --wait --as {name} '
+            '→ do the task by the skill → finish it with one agentq command → again. No progress reports to the owner.')
     opened = []
-    for n in range(have + 1, opts.count + 1):
-        message = text.format(name=f'codex-{n}', agentq=os.path.realpath(__file__))
-        if bridge:
-            run = subprocess.run([bridge, 'new', '--draft', '--cwd', project, '--message', message],
-                                 capture_output=True, text=True)
-            if run.returncode != 0:
-                raise Fail(f'codex-bridge: {run.stderr.strip() or run.stdout.strip()}')
-        else:
-            print(f'codex-{n}: open a Codex task in {project} with: {message}')
-        opened.append(f'codex-{n}')
-    state['codex_workers'] = max(have, opts.count)
+    for role in [r for r in cfg['roles'] if pulls(r)]:
+        for n in range(have.get(role['role'], 0) + 1, opts.count + 1):
+            name = f"codex-{role['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else '')
+            message = text.format(role=role['role'], name=name, agentq=os.path.realpath(__file__))
+            if bridge:
+                run = subprocess.run([bridge, 'new', '--draft', '--cwd', project, '--message', message],
+                                     capture_output=True, text=True)
+                if run.returncode != 0:
+                    raise Fail(f'codex-bridge: {run.stderr.strip() or run.stdout.strip()}')
+            else:
+                print(f'{name}: open a Codex task in {project} with: {message}')
+            opened.append(name)
+            have[role['role']] = n
     save_state(cfg, state)
-    if opened and bridge:
+    if not [r for r in cfg['roles'] if pulls(r)]:
+        print('no role takes Codex workers – `agentq team both` (or `agentq role <name> --agent both`) first.')
+    elif opened and bridge:
         print(f"{len(opened)} Codex task(s) opened in the Codex app, prefilled ({', '.join(opened)}): press Send on each.")
     elif not opened:
-        print(f'{have} Codex workers were opened before; none missing (fewer: stop or archive the extra Codex tasks).')
+        print('every role already has its Codex workers; none missing.')
 
 
 def cmd_role(cfg, opts):
@@ -2233,7 +2249,7 @@ def main(argv=None):
     ro.add_argument('name')
     ro.add_argument('--label')
     ro.add_argument('--mode', choices=MODES)
-    ro.add_argument('--agent', help='claude (the dispatcher sends tasks) or another agent such as codex (it pulls them)')
+    ro.add_argument('--agent', help='claude (the dispatcher sends tasks), codex (its workers pull them), or both (they compete)')
     ro.add_argument('--n', type=int)
     ro.add_argument('--hours', type=number)
     ro.add_argument('--paths', help='comma-separated path prefixes or globs (checker mode)')
@@ -2247,8 +2263,8 @@ def main(argv=None):
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
     te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
     te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
-    cw = sub.add_parser('codex-workers', help='open the missing Codex worker tasks (prefilled; the owner presses Send)')
-    cw.add_argument('count', type=int)
+    cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')
+    cw.add_argument('count', type=int, nargs='?', default=1, help='workers per role (default 1)')
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
     tm.add_argument('agent', choices=('claude', 'codex', 'both'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')

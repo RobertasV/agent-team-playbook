@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.43 – 2026-10-18
+- Claude and Codex compete for the same roles: a role's agent can be `both`; the dispatcher sends to free Claude sessions while Codex workers pull, and a task a Codex worker holds does not make the Claude sessions busy. `agentq team claude|codex|both` moves the work between them (the dispatcher keeps running in every mode); `agentq codex-workers` opens one prefilled Codex worker per role.
+- The Codex install asks "together with Claude, or alone?" and defaults to together; it never moves roles away from Claude on its own.
+
 ## 0.2.42 – 2026-10-18
 - `agentq codex-workers N`: opens the missing Codex worker tasks in the Codex app, prefilled (codex-bridge), numbered; the owner presses Send. The Codex install asks how many workers and runs it.
 

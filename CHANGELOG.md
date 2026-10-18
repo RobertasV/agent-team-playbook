@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.58 – 2026-10-18
+- A brief starts with the role's own description, so a long-running session follows its role's current rules on every task.
+- Releases go by a candidate tag: the approved commit is tagged (`candidate-1.2.3`), checked at that tag and built from it on GO; the release tag goes on the same commit.
+
 ## 0.2.57 – 2026-10-18
 - The owner's words on a set-aside task (deferred, waiting for another project, …) bring it back: the plan says `agentq assign N <role> --unpark`, which drops those labels, and the role reads the words and decides – before, such comments went nowhere.
 - The skill: a release is built from exactly the commit the check said GO on, never from a newer `main`.

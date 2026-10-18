@@ -1768,6 +1768,8 @@ def cmd_brief(cfg, opts):
     texts = cfg['texts']
     out = [(texts['brief_news'] if since else texts['brief_head']).format(ref=ref, role=role['role']),
            f"Title: {issue['title']}"]
+    if not since and role['description']:  # the role's own rules, every task, so a long-running session has them now
+        out.insert(1, f"Your role ({role['role']}): {role['description']}")
     shots = []
     if not since:
         author = login_of(issue)

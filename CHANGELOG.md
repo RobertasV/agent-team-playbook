@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.37 – 2026-10-18
+- The whole team can run on Codex: `agentq team codex|claude` switches the dispatcher and every role; a dispatcher running on the other agent stops at its next watch. The dispatcher folder gets an AGENTS.md for a Codex dispatcher, which loops on `agentq watch --max-minutes 9`.
+
 ## 0.2.36 – 2026-10-18
 - `agentq next` refuses a role that does not pull (agent: claude) and tells the loop to stop, so a role switched back to Claude never has two workers.
 

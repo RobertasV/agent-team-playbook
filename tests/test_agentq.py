@@ -61,7 +61,8 @@ class Base(unittest.TestCase):
         return {**os.environ, 'PATH': os.path.join(self.dir.name, 'bin') + os.pathsep + os.environ['PATH'],
                 'FAKE_GH_LOG': self.log, 'FAKE_GH_FIXTURE': self.fixture, 'AGENTQ_NOW': now,
                 'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': '',
-                'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx')}
+                'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx'),
+                'CLAUDECODE': '', 'CODEX_THREAD_ID': '', 'CODEX_SANDBOX': '', 'CLAUDE_CODE_HOST_SESSION_ID': ''}
 
     def body(self, call):
         return call[call.index('--body') + 1]
@@ -487,6 +488,22 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now=T2)
         self.assertEqual(len([c for c in self.calls(['issue', 'edit']) if 'priority' in c]), 2)  # once per issue
 
+    def test_team_moves_dispatcher_and_roles_and_the_other_dispatcher_stops(self):
+        self.data({REPO: {'open': []}})
+        out = self.run_tool('team', 'codex').stdout
+        self.assertIn('the team runs on codex now', out)
+        self.assertIn('"Read AGENTS.md and start the loop."', out)
+        with open(self.config) as f:
+            cfg = json.load(f)
+        self.assertEqual({r['agent'] for r in cfg['roles']} | {cfg['dispatcher']['agent']}, {'codex'})
+        claude = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
+                                text=True, env={**self.env(), 'CLAUDECODE': '1'})
+        self.assertIn('runs on codex now – stop this loop', claude.stdout)
+        codex = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
+                               text=True, env={**self.env(), 'CODEX_THREAD_ID': 't1'})
+        self.assertIn('no work', codex.stdout)
+        self.assertIn('send the Claude dispatcher', self.run_tool('team', 'claude').stdout)
+
     def test_an_answer_written_while_no_watcher_ran_is_not_lost(self):
         self.data({REPO: {'open': [issue(9, 'Busy', ['prog', 'doing'])]}})
         self.run_tool('watch', '--once', now='2026-01-02T08:00:00Z')
@@ -509,6 +526,7 @@ class TeamTest(Base):
     def test_watch_without_work_keeps_polling_and_a_second_watcher_steps_back(self):
         self.data({REPO: {'open': [issue(3, 'Banner', ['design', 'doing']), issue(7, 'Busy', ['prog', 'doing'])]}})
         self.assertIn('no work', self.run_tool('watch', '--once').stdout)
+        self.assertIn('no work yet – run it again', self.run_tool('watch', '--max-minutes', '0').stdout)
         with open(self.config + '.state.json') as f:
             self.assertEqual(json.load(f)['watch']['beat'], '2026-01-02T12:00:00Z')
         import fcntl
@@ -786,6 +804,8 @@ class TeamTest(Base):
         self.assertTrue(os.path.exists(os.path.join(disp, 'examples', 'README.md')))
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())
+        agents = open(os.path.join(disp, 'AGENTS.md')).read()
+        self.assertIn(f'`{os.path.realpath(TOOL)} watch --max-minutes 9`', agents)
 
     def test_role_adds_the_ready_made_marketer_and_sets_the_dispatcher_session(self):
         self.data({REPO: {'labels': []}})

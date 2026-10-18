@@ -254,7 +254,7 @@ def load_config(path):
     names = [r['role'] for r in cfg['roles']]
     cfg['default_role'] = cfg.get('default_role') or ('programmer' if 'programmer' in names else names[0])
     cfg['role'] = cfg.get('role') or cfg['default_role']
-    cfg['dispatcher'] = {'name': 'dispatcher', 'folder': '', 'session': '', **cfg.get('dispatcher', {})}
+    cfg['dispatcher'] = {'name': 'dispatcher', 'folder': '', 'session': '', 'agent': 'claude', **cfg.get('dispatcher', {})}
     skip = set(cfg.get('skip_labels', []))
     skip.update(cfg['labels'][k] for k in ('question', 'deferred', 'waiting', 'owner_word', 'health'))
     cfg['skip'] = skip
@@ -1004,14 +1004,30 @@ def watch_lock(cfg):
     return handle
 
 
+def running_in():
+    if os.environ.get('CODEX_THREAD_ID') or os.environ.get('CODEX_SANDBOX'):
+        return 'codex'
+    if os.environ.get('CLAUDECODE'):
+        return 'claude'
+    return None
+
+
 def cmd_watch(cfg, opts):
+    here = running_in()
+    if here and here != cfg['dispatcher']['agent']:  # the team moved: this dispatcher stops, the other one runs
+        print(f"agentq watch: this team's dispatcher runs on {cfg['dispatcher']['agent']} now – stop this loop.")
+        return 1
     lock = watch_lock(cfg)
     if lock is None:
         print('agentq watch: already running – nothing to do.')
         return 0
     interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
     code = os.path.getmtime(os.path.realpath(__file__))
+    deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     while True:
+        if deadline is not None and time.time() >= deadline:  # an agent that waits in the foreground (codex)
+            print('agentq watch: no work yet – run it again.')
+            return 0
         if os.getppid() == 1:  # started with & or nohup: its end would wake nobody, so the team would stall silently
             print('agentq watch: not started by the session (its parent is gone) – start it with run_in_background.')
             return 1
@@ -1724,7 +1740,7 @@ def install_dispatcher(cfg, folder):
         for name in files:
             source = os.path.join(base, name)
             target = os.path.join(folder, os.path.relpath(source, TEMPLATE))
-            managed = name == 'CLAUDE.md' and base == TEMPLATE
+            managed = name in ('CLAUDE.md', 'AGENTS.md') and base == TEMPLATE
             if os.path.exists(target) and not managed:
                 continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -1933,6 +1949,26 @@ def cmd_tests(cfg, opts):
         print(f"running since {ts['running']['at']}")
 
 
+def cmd_team(cfg, opts):
+    """Move the whole team – dispatcher and every role – to Claude or to another agent such as codex."""
+    def change(raw):
+        raw.setdefault('dispatcher', {})['agent'] = opts.agent
+        for r in raw.setdefault('roles', [{**x, 'session': ''} for x in DEFAULT_ROLES]):
+            r['agent'] = opts.agent
+    cfg = save_config(cfg, change)
+    folder = cfg['dispatcher']['folder'] or '<the dispatcher folder>'
+    print(f'the team runs on {opts.agent} now; the other dispatcher stops at its next watch.')
+    if opts.agent == 'claude':
+        print(f"Now: send the Claude dispatcher ({cfg['dispatcher']['session'] or 'no session id'}) \"Start the watcher\"; "
+              f"the codex tasks stop by themselves (their next agentq call tells them to).")
+    else:
+        print(f'Now, in {opts.agent}: 1. a task in {folder}: "Read AGENTS.md and start the loop." '
+              f'2. one task per role worker, in the project folder: "Loop: agentq next <role> --wait --as {opts.agent}-1, '
+              f'do the task, finish it with one agentq command, repeat."')
+        for r in cfg['roles']:
+            print(f"   - {r['role']}: {max(1, len(r['pool']))} worker(s)")
+
+
 def cmd_role(cfg, opts):
     """Add or change a role (or the dispatcher's session) in the config, then create its labels."""
     name = opts.name.strip()
@@ -2031,6 +2067,7 @@ def main(argv=None):
     wt = sub.add_parser('watch', help='poll the board every minute; print a plan and exit when there is work')
     wt.add_argument('--once', action='store_true', help='poll once')
     wt.add_argument('--interval', type=float, help='seconds between polls (default: poll_seconds)')
+    wt.add_argument('--max-minutes', type=float, help='give up after this long (an agent that waits in the foreground)')
     nx = sub.add_parser('next', help='pull mode (codex, …): take the role\'s next task and print its brief')
     nx.add_argument('role')
     nx.add_argument('--wait', action='store_true', help='wait without tokens until there is one')
@@ -2115,6 +2152,8 @@ def main(argv=None):
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
     te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
     te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
+    tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
+    tm.add_argument('agent', choices=('claude', 'codex'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
     sc.add_argument('role')
     sc.add_argument('count', type=int)
@@ -2142,7 +2181,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

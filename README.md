@@ -43,7 +43,7 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 
 ## Codex and other agents
 
-A role may run in Codex or another agent instead of a Claude session: `agentq role <name> --agent codex`. The dispatcher then sends it nothing; the agent loops on `agentq next <role> --wait` (waits without tokens, prints the next task), does the task and finishes it with the usual commands. `agentq init --codex` points the project's AGENTS.md at the skill. Reminders for quiet sessions and per-task model switches are Claude-only; the hourly health check still reports a task that stops moving.
+A role may run in Codex or another agent instead of a Claude session: `agentq role <name> --agent codex`. The dispatcher then sends it nothing; the agent loops on `agentq next <role> --wait` (waits without tokens, prints the next task), does the task and finishes it with the usual commands. `agentq init --codex` points the project's AGENTS.md at the skill. `agentq team codex` moves the whole team, dispatcher included: the dispatcher folder has an AGENTS.md for a Codex dispatcher, and the Claude dispatcher stops by itself; `agentq team claude` moves it back. Reminders for quiet sessions and per-task model switches are Claude-only; the hourly health check still reports a task that stops moving.
 
 ## Install into a project
 

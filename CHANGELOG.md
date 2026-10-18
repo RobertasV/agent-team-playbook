@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.62 – 2026-10-18
+- When a task the owner was told is stuck moves on (its session woke up, or it got finished), the watcher says so on the health issue at once and closes it when nothing else is wrong – the owner no longer finds a stale alarm.
+
 ## 0.2.61 – 2026-10-18
 - A Claude session's activity also counts the app's own last-activity time, not only its transcript: a session running a long test run looked quiet and its tasks were released while it worked.
 

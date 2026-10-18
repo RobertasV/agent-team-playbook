@@ -344,7 +344,12 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now='2026-01-02T13:30:00Z')
         self.assertEqual(len(self.calls(['issue', 'create'])), 1)  # told once
         self.session('local_p', '2026-01-02T13:31:00Z')  # it woke up
+        self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z'),
+                                   issue(70, 'Agent team health', ['agent health', 'ask owner'])], 'next': 71}})
         self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T13:40:00Z').stdout)
+        said = [self.body(c) for c in self.calls(['issue', 'comment'])[-2:]]  # the owner hears it; the issue closes
+        self.assertIn(f'{REPO}#7: not stuck any more', said[0])
+        self.assertIn('all well again', said[1])
 
     def test_where_sessions_cannot_be_seen_the_dispatcher_checks_them(self):
         with open(self.config) as f:

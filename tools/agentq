@@ -67,6 +67,7 @@ DEFAULT_TEXTS = {
     'checked': 'checked {refs}. {text}',
     'health_title': 'Agent team health',
     'health_ok': 'all well again.',
+    'health_moved': '{refs}: not stuck any more (finished, or taken again) – nothing for you to do.',
     'health_watch': 'the watcher is not running (last poll: {since}) – the dispatcher sends no tasks. Re-run setup.',
     'health_stuck': 'the watcher has not polled since {since}.',
     'health_error': "the watcher's last poll failed: {error}",
@@ -854,6 +855,7 @@ def check_held(cfg, state, repo, issues, start, plan):
     nudges = state.setdefault('nudges', {})
     checks = state.setdefault('held_checked', {})
     idle = dt.timedelta(minutes=cfg['idle_minutes'])
+    told = {r for r, n in nudges.items() if r.startswith(repo + '#') and n.get('told')}
     held = set()
     for role in cfg['roles']:
         for issue in busy_with(cfg, issues, role):
@@ -885,6 +887,10 @@ def check_held(cfg, state, repo, issues, start, plan):
     for table in (nudges, checks, state.setdefault('holders', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
+    resolved = sorted(told - {r for r, n in nudges.items() if n.get('told')})
+    if resolved:  # the owner was told it was stuck; it moved on (finished, or taken again): say so and close
+        still = [r for r, n in nudges.items() if n.get('told')]
+        report_health(cfg, state, [], close=not still, done=resolved)
 
 
 def check_prs(cfg, state, repo, start, issues=()):
@@ -2173,12 +2179,17 @@ def cmd_health(cfg, opts):
     save_state(cfg, state)
 
 
-def report_health(cfg, state, problems, needs_owner=False, close=True):
-    """One health issue for the owner: created, commented when the problems change, closed when all is well."""
+def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):
+    """One health issue for the owner: created, commented when the problems change, closed when all is well.
+    `done`: stuck tasks the owner was told about that moved on – said on the issue, with no need to act."""
     texts = cfg['texts']
     repo = cfg['repos'][0]
     label = cfg['labels']['health']
     found = gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '5', '--json', 'number')
+    if done and found:
+        comment(cfg, repo, found[0]['number'], texts['health_moved'].format(refs=', '.join(done)), 'health')
+        if close:
+            relabel(repo, found[0]['number'], remove=[cfg['labels']['question']])
     report = '\n'.join(f'- {p}' for p in problems)
     extra = [cfg['labels']['question']] if needs_owner else []
     if problems and found:

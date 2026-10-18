@@ -15,6 +15,7 @@ import html
 import json
 import os
 import re
+from shutil import which as shutil_which
 import socket
 import uuid
 from shlex import quote as shlex_quote
@@ -2035,6 +2036,34 @@ def cmd_team(cfg, opts):
             print(f"   - {r['role']}: {max(1, len(r['pool']))} worker(s)")
 
 
+def cmd_workers(cfg, opts):
+    """Codex workers for the whole team: open the missing prefilled Codex tasks in the project (the owner presses Send)."""
+    state = load_state(cfg)
+    have = int(state.get('codex_workers', 0))
+    project = cfg.get('checkout') or os.getcwd()
+    text = ('Join the agent team in this project as worker {name}: read the skill AGENTS.md points to (section '
+            '"Codex and other agents"), then loop without stopping: {agentq} next --wait --as {name} → do the task by the '
+            'skill → finish it with one agentq command → again. No progress reports to the owner.')
+    bridge = shutil_which('codex-bridge')
+    opened = []
+    for n in range(have + 1, opts.count + 1):
+        message = text.format(name=f'codex-{n}', agentq=os.path.realpath(__file__))
+        if bridge:
+            run = subprocess.run([bridge, 'new', '--draft', '--cwd', project, '--message', message],
+                                 capture_output=True, text=True)
+            if run.returncode != 0:
+                raise Fail(f'codex-bridge: {run.stderr.strip() or run.stdout.strip()}')
+        else:
+            print(f'codex-{n}: open a Codex task in {project} with: {message}')
+        opened.append(f'codex-{n}')
+    state['codex_workers'] = max(have, opts.count)
+    save_state(cfg, state)
+    if opened and bridge:
+        print(f"{len(opened)} Codex task(s) opened in the Codex app, prefilled ({', '.join(opened)}): press Send on each.")
+    elif not opened:
+        print(f'{have} Codex workers were opened before; none missing (fewer: stop or archive the extra Codex tasks).')
+
+
 def cmd_role(cfg, opts):
     """Add or change a role (or the dispatcher's session) in the config, then create its labels."""
     name = opts.name.strip()
@@ -2218,6 +2247,8 @@ def main(argv=None):
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
     te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
     te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
+    cw = sub.add_parser('codex-workers', help='open the missing Codex worker tasks (prefilled; the owner presses Send)')
+    cw.add_argument('count', type=int)
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
     tm.add_argument('agent', choices=('claude', 'codex', 'both'))
     sc = sub.add_parser('scale', help='how many sessions of a role work in parallel; sessions are kept, never deleted')
@@ -2247,7 +2278,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'codex-workers': cmd_workers, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

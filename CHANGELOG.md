@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.42 – 2026-10-18
+- `agentq codex-workers N`: opens the missing Codex worker tasks in the Codex app, prefilled (codex-bridge), numbered; the owner presses Send. The Codex install asks how many workers and runs it.
+
 ## 0.2.41 – 2026-10-18
 - An install run in Codex always does the Codex part of step 5, even when the team already runs on Claude: it asks which roles work in Codex, switches them, and starts working.
 

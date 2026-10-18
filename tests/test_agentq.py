@@ -484,6 +484,18 @@ class TeamTest(Base):
                                                        'user': {'login': 'boss'}}}})
         self.assertIn(f'{REPO}#9 is yours now (w1).', self.run_tool('next', '--as', 'w1').stdout)
 
+    def test_codex_workers_are_opened_once_each(self):
+        bridge = os.path.join(self.dir.name, 'bin', 'codex-bridge')
+        with open(bridge, 'w') as f:
+            f.write(f'#!/bin/sh\necho "$@" >> {self.dir.name}/bridge.log\n')
+        os.chmod(bridge, 0o755)
+        self.assertIn('2 Codex task(s) opened', self.run_tool('codex-workers', '2').stdout)
+        self.assertIn('codex-3', self.run_tool('codex-workers', '3').stdout)
+        log = open(os.path.join(self.dir.name, 'bridge.log')).read()
+        self.assertEqual([w for w in ('codex-1', 'codex-2', 'codex-3') if f'--as {w}' in log], ['codex-1', 'codex-2', 'codex-3'])
+        self.assertEqual(log.count('new --draft'), 3)
+        self.assertIn('none missing', self.run_tool('codex-workers', '2').stdout)
+
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},
                    'api': {f'repos/{REPO}/issues/7/comments': [

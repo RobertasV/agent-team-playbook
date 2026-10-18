@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.53 – 2026-10-18
+- Codex workers get the role's reasoning effort (extra high by default): `agentq codex-workers` names it per worker and the skill passes it to `create_thread` (the first ones ran at Codex's default, medium).
+
 ## 0.2.52 – 2026-10-18
 - Codex workers are created like Claude sessions: `agentq codex-workers [count]` lists a title and a first message per missing worker, and a Codex task in the app creates each with its `create_thread` tool – listed under the project, started at once, no clicks (found by a Codex investigation).
 

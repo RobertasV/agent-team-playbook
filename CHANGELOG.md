@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.47 – 2026-10-18
+- `assign` no longer sends a task to a session that waits in `agentq next`: it queues it and that session takes it itself (seen live: a programmer held two tasks at once – one pushed, one pulled).
+
 ## 0.2.46 – 2026-10-18
 - `agentq live <role> "<command {sha}>"`: one role (usually the checker) restarts the owner's running copy after a check says GO, on the last green commit; every other role's brief says never to restart it. Off by default and with `--off` – for a program that runs on another machine or deploys itself. The install asks about it.
 

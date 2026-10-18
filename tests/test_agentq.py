@@ -557,6 +557,8 @@ class TeamTest(Base):
         board[REPO]['open'] = [issue(8, 'Logo', ['prog'])]
         self.data(board)
         self.assertNotIn('assign', self.run_tool('watch', '--once').stdout)  # no dispatcher wake for it
+        out = self.run_tool('assign', '8', 'programmer').stdout  # e.g. the owner answered: no message on top of its pull
+        self.assertIn('queued: a free session waiting in `agentq next` takes it itself', out)
 
     def rollout(self, thread, at):
         """The Codex task's rollout file, last written at this time."""

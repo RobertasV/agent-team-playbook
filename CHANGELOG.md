@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.44 – 2026-10-18
+- Every worker pulls: a Claude session runs `agentq next <role> --wait` in the background after each task and is woken with the next one; the dispatcher sends tasks only to sessions that are not waiting, so it wakes far less (the owner's rule: no more requests than one session doing everything). Waiting workers use the watcher's board snapshot; a worker's own held task is checked on GitHub.
+- Team labels: a task gets `claude` or `codex` when taken; comments say which team wrote them; `agentq stats` compares the teams (tasks, hours from taking to closing, problems found later).
+- Briefs and the skill: never message other sessions or offer to take part of someone else's task; no work means waiting in `agentq next`.
+
 ## 0.2.43 – 2026-10-18
 - Claude and Codex compete for the same roles: a role's agent can be `both`; the dispatcher sends to free Claude sessions while Codex workers pull, and a task a Codex worker holds does not make the Claude sessions busy. `agentq team claude|codex|both` moves the work between them (the dispatcher keeps running in every mode); `agentq codex-workers` opens one prefilled Codex worker per role.
 - The Codex install asks "together with Claude, or alone?" and defaults to together; it never moves roles away from Claude on its own.

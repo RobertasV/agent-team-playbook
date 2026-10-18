@@ -49,6 +49,8 @@ DEFAULT_LABELS = {
     'batch': 'check batch',
     'health': 'agent health',
     'checked': 'checked: {role}',
+    'by_claude': 'claude',
+    'by_codex': 'codex',
 }
 DEFAULT_TEXTS = {
     'take': 'taking this.',
@@ -107,6 +109,9 @@ DEFAULT_TEXTS = {
     'moved_copy': 'moved here from {ref}.',
     'split': 'the part for {repo} is {other}.',
     'split_from': 'Split from {ref}.',
+    'after': ('Never message other sessions and never offer to take part of a task someone else holds: the board '
+              'carries everything. When you have finished, get your next task with `agentq next {role} --wait` '
+              '(Claude: with run_in_background – it wakes you; Codex: in the foreground with --max-minutes 55).'),
     'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new task that links '
                      'the original (`agentq open <role> "title" "From the check of #N: …"`); never reopen the original.\n'
                      'Finish with: `agentq checked {ref} "short summary"`'),
@@ -381,11 +386,12 @@ def holder_of(state, role, ref):
     return sid if sid in role['sessions'] else role['session']
 
 
-def free_session(state, role, held_refs):
+def free_session(state, role, held_refs, waiting=()):
     holders = state.get('holders', {})
     taken = {holders.get(r) for r in held_refs if holders.get(r) in role['sessions']}
     unknown = sum(1 for r in held_refs if holders.get(r) not in role['sessions'])
     free = [x for x in role['pool'] if x not in taken][unknown:]
+    free = [x for x in free if x not in waiting] or free  # a waiting session takes its next task itself
     return free[0] if free else role['session']
 
 
@@ -431,7 +437,8 @@ def view(repo, number):
 
 
 def comment(cfg, repo, number, text, who=None):
-    body = f"🤖 {who or cfg['role']}: {text}"
+    agent = running_in()
+    body = f"🤖 {who or cfg['role']}{' · ' + agent if agent else ''}: {text}"
     gh('issue', 'comment', str(number), '-R', repo, '--body', body)
 
 
@@ -910,8 +917,10 @@ def build_plan(cfg, state, start):
     window = start - dt.timedelta(hours=cfg['forward_hours'])
     delivered = load_delivered(cfg)
     plan = []
+    boards = {}
     for repo in cfg['repos']:
         issues = real_board(cfg, state, repo)
+        boards[repo] = {'at': iso(start), 'issues': issues}
         taken = set()
         news, fresh = {}, []
         first = delivered is None or repo not in delivered
@@ -964,7 +973,9 @@ def build_plan(cfg, state, start):
         for role in cfg['roles']:
             if not pushes(role):
                 continue  # its workers take their own tasks with `agentq next`
-            slots = capacity(role) - len(session_held(state, role, repo, busy_with(cfg, issues, role))) - (role['role'] in taken)
+            pulling = waiting_workers(cfg, role) & set(role['pool'])  # they take their next task themselves
+            slots = capacity(role) - len(session_held(state, role, repo, busy_with(cfg, issues, role))) \
+                - len(pulling) - (role['role'] in taken)
             picked = []
             while slots > 0:
                 issue = next_issue(cfg, issues, role, picked)
@@ -981,6 +992,7 @@ def build_plan(cfg, state, start):
                  if not role_of_labels(cfg, labels_of(i)) and not skip & set(labels_of(i)) and trusted(cfg, i)]
         for issue in loose[:10]:
             plan.append(('classify', f"{repo}#{issue['number']}", None, issue['title'], None))
+    save_board(cfg, boards)
     return plan
 
 
@@ -1039,6 +1051,12 @@ def watcher_running(cfg):
             return True
         lock.close()
     return False
+
+
+def agent_labels(cfg, agent):
+    """The label saying which team works a task (for `agentq stats`), and the other one to remove."""
+    mine, other = ('by_codex', 'by_claude') if agent == 'codex' else ('by_claude', 'by_codex')
+    return [cfg['labels'][mine]], [cfg['labels'][other]]
 
 
 def running_in():
@@ -1157,75 +1175,147 @@ def claim(cfg, repo, number, text, who):
     return False
 
 
+def waiting_dir(cfg):
+    return cfg['state_file'] + '.waiting'
+
+
+def mark_waiting(cfg, worker, role_names):
+    os.makedirs(waiting_dir(cfg), exist_ok=True)
+    with open(os.path.join(waiting_dir(cfg), worker.replace('/', '_')), 'w', encoding='utf-8') as f:
+        json.dump({'worker': worker, 'roles': role_names}, f)
+
+
+def unmark_waiting(cfg, worker):
+    try:
+        os.remove(os.path.join(waiting_dir(cfg), worker.replace('/', '_')))
+    except OSError:
+        pass
+
+
+def waiting_workers(cfg, role):
+    """Workers of this role waiting in `agentq next --wait` right now (a heartbeat in the last 150 seconds)."""
+    found = set()
+    for path in glob.glob(os.path.join(glob.escape(waiting_dir(cfg)), '*')):
+        try:
+            if time.time() - os.path.getmtime(path) > 150:
+                continue
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if role['role'] in data.get('roles', []):
+            found.add(data['worker'])
+    return found
+
+
+def shared_board(cfg, state, repo):
+    """The board as the watcher last read it, when fresh; else read it now. Many waiting workers, one reader."""
+    try:
+        with open(cfg['state_file'] + '.board.json', encoding='utf-8') as f:
+            snap = json.load(f).get(repo)
+        if snap and now() - parse_time(snap['at']) <= dt.timedelta(seconds=2 * cfg['poll_seconds'] + 30):
+            return snap['issues']
+    except (OSError, ValueError, KeyError):
+        pass
+    return real_board(cfg, state, repo)
+
+
+def save_board(cfg, boards):
+    tmp = cfg['state_file'] + '.board.json.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(boards, f)
+    os.replace(tmp, cfg['state_file'] + '.board.json')
+
+
 def cmd_next(cfg, opts):
-    """Pull mode, for agents outside the desktop app (codex, …): take the next task and print its brief – of one role,
-    or, without a role, of any pulling role (one worker for the whole team). With --wait it waits without tokens until
-    there is one (at most --max-minutes, then says to run it again)."""
+    """Take the next task and print its brief – the way every worker gets work, Claude sessions (run it in the
+    background) and Codex tasks alike. One role, or without a role any role this worker may pull for. With --wait it
+    waits without tokens until there is one (forever, or --max-minutes)."""
+    here = running_in()
+    session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if here == 'claude' else None
+    worker = opts.who or session or f"{socket.gethostname().split('.')[0]}-{opts.role or 'team'}"
+
+    def may(role):  # a role's own Claude session, or any worker of a role that pulls
+        return worker in role['sessions'] or pulls(role)
     if opts.role:
         roles = [role_by_name(cfg, opts.role)]
-        if not pulls(roles[0]):
-            print(f"{roles[0]['role']} does not pull (agent: claude): the dispatcher sends its tasks. Stop this loop.")
+        if not may(roles[0]):
+            print(f"{roles[0]['role']} does not pull (agent: claude) and {worker} is not its session: the dispatcher "
+                  f"sends its tasks. Stop this loop.")
             return 1
     else:
-        roles = [r for r in cfg['roles'] if pulls(r)]
+        roles = [r for r in cfg['roles'] if may(r)]
         if not roles:
-            print('no role pulls its tasks (all are agent: claude) – run `agentq role <name> --agent codex` first.')
+            print('no role this worker may pull for – `agentq role <name> --agent codex|both` first.')
             return 1
-    worker = opts.who or f"{socket.gethostname().split('.')[0]}-{opts.role or 'team'}"
-    deadline = time.time() + 60 * opts.max_minutes
-    while True:
-        state = load_state(cfg)
-        if not state.get('paused'):
-            holders = state.setdefault('holders', {})
-            for repo in cfg['repos']:
-                issues = real_board(cfg, state, repo)
-                candidates = []
-                for role in roles:
-                    held = busy_with(cfg, issues, role)
-                    mine = [i for i in held if holders.get(f"{repo}#{i['number']}") == worker]
-                    if mine:
-                        ref = f"{repo}#{mine[0]['number']}"
-                        print(f'you hold {ref} ({role["role"]}) – finish it first (agentq done / ask / route / wait); '
-                              f'its task again:')
+    agent = 'claude' if worker in {x for r in roles for x in r['sessions']} or here == 'claude' else 'codex'
+    add_agent, drop_agent = agent_labels(cfg, agent)
+    deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
+    try:
+        while True:
+            if os.getppid() == 1:
+                print('agentq next: its session is gone – stop.')
+                return 1
+            mark_waiting(cfg, worker, [r['role'] for r in roles])
+            state = load_state(cfg)
+            if not state.get('paused'):
+                holders = state.setdefault('holders', {})
+                for ref in [r for r, w in holders.items() if w == worker]:  # checked on GitHub, not in a snapshot
+                    repo, number = ref.split('#')
+                    fresh = view(repo, int(number)) if repo in cfg['repos'] else {}
+                    if fresh.get('state', 'OPEN') == 'OPEN' and cfg['labels']['working'] in labels_of(fresh):
+                        print(f'you hold {ref} – finish it first (agentq done / ask / route / wait); its task again:')
                         cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
                         return 0
-                    if not pushes(role) and role['pool'] and len(held) >= capacity(role):
-                        continue
-                    picked = []
-                    while True:  # this role's queue, in its order
-                        issue = next_issue(cfg, issues, role, picked)
-                        if not issue:
-                            break
-                        picked.append(issue['number'])
-                        candidates.append((role, issue))
-                labels = cfg['labels']
-                candidates.sort(key=lambda c: (labels['priority'] not in labels_of(c[1]),
-                                               labels['blocking'] not in labels_of(c[1]), c[1]['number']))
-                ref = None
-                for role, issue in candidates:
-                    if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
-                        ref = f"{repo}#{issue['number']}"
-                        relabel(repo, issue['number'], add=[labels['working']])
-                        break  # a loser goes on to the next candidate: another worker took that one a moment earlier
-                if not ref:
+                    del holders[ref]
+                for repo in cfg['repos']:
+                    issues = shared_board(cfg, state, repo)
+                    candidates = []
                     for role in roles:
-                        if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
-                            items = unchecked(cfg, state, repo, role, {})[:20]
-                            if batch_ready(cfg, role, items, now()):
-                                ref = create_batch(cfg, state, repo, role, items)
+                        held = busy_with(cfg, issues, role)
+                        if not pushes(role) and role['pool'] and len(held) >= capacity(role):
+                            continue
+                        picked = []
+                        while True:  # this role's queue, in its order
+                            issue = next_issue(cfg, issues, role, picked)
+                            if not issue:
                                 break
-                if ref:
-                    holders[ref] = worker
-                    save_state(cfg, state)
-                    print(f'{ref} is yours now ({worker}).')
-                    cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
-                    return 0
-            save_state(cfg, state)
-        if not opts.wait or time.time() >= deadline:
-            again = f'agentq next {opts.role} --wait' if opts.role else 'agentq next --wait'
-            print(f"nothing yet – run `{again}` again.")
-            return 0
-        time.sleep(cfg['poll_seconds'])
+                            picked.append(issue['number'])
+                            candidates.append((role, issue))
+                    labels = cfg['labels']
+                    candidates.sort(key=lambda c: (labels['priority'] not in labels_of(c[1]),
+                                                   labels['blocking'] not in labels_of(c[1]), c[1]['number']))
+                    ref = None
+                    for role, issue in candidates:
+                        fresh = view(repo, issue['number'])  # the snapshot may be a minute old
+                        if fresh.get('state', 'OPEN') != 'OPEN' or labels['working'] in labels_of(fresh) \
+                                or role['label'] not in labels_of(fresh):
+                            continue
+                        if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role']):
+                            ref = f"{repo}#{issue['number']}"
+                            relabel(repo, issue['number'], add=[labels['working']] + add_agent,
+                                    remove=[n for n in drop_agent if n in labels_of(fresh)])
+                            break  # a loser goes on: another worker took that one a moment earlier
+                    if not ref:
+                        for role in roles:
+                            if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
+                                items = unchecked(cfg, state, repo, role, {})[:20]
+                                if batch_ready(cfg, role, items, now()):
+                                    ref = create_batch(cfg, state, repo, role, items, add_agent)
+                                    break
+                    if ref:
+                        holders[ref] = worker
+                        save_state(cfg, state)
+                        print(f'{ref} is yours now ({worker}).')
+                        cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
+                        return 0
+            if not opts.wait or (deadline is not None and time.time() >= deadline):
+                again = f'agentq next {opts.role} --wait' if opts.role else 'agentq next --wait'
+                print(f"nothing yet – run `{again}` again.")
+                return 0
+            time.sleep(cfg['poll_seconds'])
+    finally:
+        unmark_waiting(cfg, worker)
 
 
 def cmd_assign(cfg, opts):
@@ -1258,8 +1348,9 @@ def cmd_assign(cfg, opts):
     if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who):
         print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
         return
-    relabel(repo, number, add=[role['label'], labels['working']], remove=remove)
-    sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy])
+    relabel(repo, number, add=[role['label'], labels['working'], *agent_labels(cfg, 'claude')[0]],
+            remove=remove + [n for n in agent_labels(cfg, 'claude')[1] if n in names])
+    sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy], waiting_workers(cfg, role))
     state.setdefault('holders', {})[ref] = sid
     print(f"{ref} → {role['role']}, working. Now:")
     print_send(cfg, state, role, ref, names, batch=labels['batch'] in names, sid=sid)
@@ -1349,6 +1440,7 @@ def cmd_brief(cfg, opts):
         if not batch and role['mode'] == 'programmer':
             out.append(texts['tests_batched' if cfg['tests']['mode'] == 'batched' else 'tests_per_task']
                        .format(every=cfg['tests']['every']))
+        out.append(texts['after'].format(role=role['role']))
     print('\n'.join(out))
 
 
@@ -1633,14 +1725,14 @@ def cmd_batch(cfg, opts):
     if not opts.now and not batch_ready(cfg, role, items, now()):
         print(f'not ready: {len(items)} of {role["n"]}, the oldest closed {items[0]["closedAt"]} (--now to check anyway)')
         return
-    ref = create_batch(cfg, state, repo, role, items)
+    ref = create_batch(cfg, state, repo, role, items, agent_labels(cfg, 'claude')[0])
     refs = ' '.join(f"#{i['number']}" for i in items)
     print(f"{ref} created: {role['role']} checks {refs}. Now:")
     print_send(cfg, state, role, ref, [], batch=True)
     save_state(cfg, state)
 
 
-def create_batch(cfg, state, repo, role, items):
+def create_batch(cfg, state, repo, role, items, extra=()):
     refs = ' '.join(f"#{i['number']}" for i in items)
     commit = git(cfg['checkout'], 'rev-parse', 'HEAD').strip() if cfg.get('checkout') else 'not pinned (no checkout in the config)'
     body = cfg['texts']['batch_body'].format(role=role['role'], commit=commit,
@@ -1651,7 +1743,7 @@ def create_batch(cfg, state, repo, role, items):
         body += '\n' + cfg['texts']['tests_line'].format(result=result)
     mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items]})
     number = create_issue(repo, cfg['texts']['batch_title'].format(refs=refs), f'{body}\n\n<!-- agentq:batch {mark} -->',
-                          [role['label'], cfg['labels']['batch'], cfg['labels']['working']])
+                          [role['label'], cfg['labels']['batch'], cfg['labels']['working'], *extra])
     return f'{repo}#{number}'
 
 
@@ -1790,7 +1882,7 @@ def cmd_nudge(cfg, opts):
 
 def all_labels(cfg):
     names = {cfg['labels'][k]: k for k in ('working', 'question', 'deferred', 'waiting', 'priority', 'blocking',
-                                            'hard', 'owner_word', 'batch', 'health')}
+                                            'hard', 'owner_word', 'batch', 'health', 'by_claude', 'by_codex')}
     for role in cfg['roles']:
         names.setdefault(role['label'], f'role: {role["role"]}')
         if role['mode'] == 'checker':
@@ -2055,8 +2147,9 @@ def cmd_workers(cfg, opts):
     project = cfg.get('checkout') or os.getcwd()
     bridge = shutil_which('codex-bridge')
     text = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md points '
-            'to (section "Codex and other agents"), then loop without stopping: {agentq} next {role} --wait --as {name} '
-            '→ do the task by the skill → finish it with one agentq command → again. No progress reports to the owner.')
+            'to (section "Claude and Codex"), then loop without stopping: {agentq} next {role} --wait --max-minutes 55 --as {name} '
+            '(give that command a timeout of at least 60 minutes) → do the task by the skill → finish it with one agentq '
+            'command → again. No progress reports to the owner.')
     opened = []
     for role in [r for r in cfg['roles'] if pulls(r)]:
         for n in range(have.get(role['role'], 0) + 1, opts.count + 1):
@@ -2078,6 +2171,39 @@ def cmd_workers(cfg, opts):
         print(f"{len(opened)} Codex task(s) opened in the Codex app, prefilled ({', '.join(opened)}): press Send on each.")
     elif not opened:
         print('every role already has its Codex workers; none missing.')
+
+
+def cmd_stats(cfg, opts):
+    """Who works better: tasks done, time from taking to closing, and problems the checkers found afterwards,
+    per team (the claude / codex labels)."""
+    since = iso(now() - dt.timedelta(days=opts.days))
+    labels = cfg['labels']
+    teams = {labels['by_claude']: 'claude', labels['by_codex']: 'codex'}
+    rows = {'claude': [], 'codex': []}
+    found = {'claude': 0, 'codex': 0}
+    agent_of = {}
+    for repo in cfg['repos']:
+        for issue in gh_json('issue', 'list', '-R', repo, '--state', 'closed', '--limit', '500', '--search',
+                             f'closed:>={since}', '--json', 'number,labels,closedAt,stateReason,comments'):
+            names = labels_of(issue)
+            team = next((teams[n] for n in names if n in teams), None)
+            if not team or issue.get('stateReason') == 'NOT_PLANNED' or labels['health'] in names:
+                continue
+            agent_of[(repo, issue['number'])] = team
+            claims = [c['createdAt'] for c in issue.get('comments', []) if CLAIM_MARK.search(c.get('body') or '')]
+            hours = (parse_time(issue['closedAt']) - parse_time(claims[-1])).total_seconds() / 3600 if claims else None
+            rows[team].append(hours)
+        for issue in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '500', '--search',
+                             f'created:>={since} "From the check of" in:body', '--json', 'number,body'):
+            for n in re.findall(r'From the check of #(\d+)', issue.get('body') or ''):
+                team = agent_of.get((repo, int(n)))
+                if team:
+                    found[team] += 1
+    print(f'last {opts.days:g} days: team | tasks done | median hours from taking to closing | problems found later')
+    for team, hours in rows.items():
+        known = sorted(h for h in hours if h is not None)
+        median = f'{known[len(known) // 2]:.1f}' if known else '-'
+        print(f'{team} | {len(hours)} | {median} | {found[team]}')
 
 
 def cmd_role(cfg, opts):
@@ -2182,8 +2308,8 @@ def main(argv=None):
     nx = sub.add_parser('next', help='pull mode (codex, …): take the role\'s next task and print its brief')
     nx.add_argument('role', nargs='?', help='one role; without it, any role that pulls (one worker for the team)')
     nx.add_argument('--wait', action='store_true', help='wait without tokens until there is one')
-    nx.add_argument('--max-minutes', type=float, default=9, help='with --wait: give up after this long (default 9)')
-    nx.add_argument('--as', dest='who', help='which worker of the role takes it (e.g. codex-1)')
+    nx.add_argument('--max-minutes', type=float, help='with --wait: give up after this long (default: wait until there is one)')
+    nx.add_argument('--as', dest='who', help='which worker takes it (default: this Claude session, or <host>-<role>)')
     s = sub.add_parser('assign', help='give an issue to a role (working if the role is free, else queued)')
     s.add_argument('issue')
     s.add_argument('role')
@@ -2263,6 +2389,8 @@ def main(argv=None):
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
     te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
     te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
+    st = sub.add_parser('stats', help='who works better: Claude or Codex (tasks, time, problems found later)')
+    st.add_argument('--days', type=float, default=30)
     cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')
     cw.add_argument('count', type=int, nargs='?', default=1, help='workers per role (default 1)')
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
@@ -2294,7 +2422,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'codex-workers': cmd_workers, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         return commands[opts.cmd](cfg, opts) or 0

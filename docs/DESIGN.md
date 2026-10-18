@@ -53,6 +53,10 @@ A role may have several sessions (a pool, e.g. five programmers): one label, one
 
 Busy is read from the board, so a role never gets a second task while it works on one. A direct chat between the owner and a session is not on the board; a task message then waits until the session answers the owner.
 
+## Tokens: no more than one session doing everything
+
+The owner's rule (2026-10-18): the team must not spend more model requests on the same work than one session would. So every worker pulls: after a task it waits in `agentq next --wait` (Claude: a background command, woken when its task arrives; Codex: a foreground command of up to 55 minutes) – waiting costs no tokens, and taking a task costs one command, as it would for a lone session. The dispatcher is woken only to sort new tasks into roles, pass on the owner's words and nudge a quiet session; it sends tasks only to sessions that are not waiting. Waiting workers read the watcher's board snapshot instead of asking GitHub themselves.
+
 ## Claude and Codex
 
 Decided by the owner on 2026-10-18: Claude and Codex each have their own workers for the same roles and compete for the same tasks; the owner shifts the work to whichever has tokens left (`agentq team claude|codex|both`). A role's agent is claude (the dispatcher sends to its sessions), codex (its workers pull with `agentq next`) or both. Claims keep two workers from taking one task; a task a Codex worker holds does not count against the Claude sessions' capacity, and its new owner words reach it through `agentq done`. The dispatcher keeps running in every mode; Codex worker tasks are opened prefilled (`agentq codex-workers`) and started by the owner.

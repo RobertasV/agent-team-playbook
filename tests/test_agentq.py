@@ -448,10 +448,11 @@ class TeamTest(Base):
         out = self.run_tool('next', 'designer', '--as', 'codex-1').stdout
         self.assertIn(f'{REPO}#8 is yours now (codex-1).', out)
         self.assertIn('make it round', out)
-        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'])
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing',
+                                                             '--add-label', 'codex'])
         board[REPO]['open'][1]['labels'].append({'name': 'doing'})
         self.data(board)
-        self.assertIn(f'you hold {REPO}#8 (designer) – finish it first', self.run_tool('next', 'designer', '--as', 'codex-1').stdout)
+        self.assertIn(f'you hold {REPO}#8 – finish it first', self.run_tool('next', 'designer', '--as', 'codex-1').stdout)
         out = self.run_tool('assign', '7', 'designer').stdout
         self.assertIn('it takes its tasks itself (agentq next). Nothing to send.', out)
         self.data({REPO: {'open': []}})
@@ -494,7 +495,7 @@ class TeamTest(Base):
         self.assertIn('3 Codex task(s) opened', self.run_tool('codex-workers').stdout)
         self.assertIn('none missing', self.run_tool('codex-workers').stdout)
         log = open(os.path.join(self.dir.name, 'bridge.log')).read()
-        self.assertIn('next programmer --wait --as codex-programmer', log)
+        self.assertIn('next programmer --wait --max-minutes 55 --as codex-programmer', log)
         self.assertEqual(log.count('new --draft'), 3)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
@@ -510,6 +511,37 @@ class TeamTest(Base):
         out = self.run_tool('watch', '--once').stdout  # the Codex worker's task does not make the Claude session busy
         self.assertIn(f'next task for programmer: run `agentq assign {REPO}#8 programmer`', out)
         self.assertIn('send this line to session local_p', self.run_tool('assign', '8', 'programmer').stdout)
+
+    def test_a_claude_session_pulls_and_the_dispatcher_leaves_it_alone(self):
+        board = {REPO: {'open': [issue(7, 'Icon', ['prog']), issue(8, 'Logo', ['prog'])]},
+                 'api': {f'repos/{REPO}/issues/{n}': {'title': 't', 'body': 'x', 'labels': [{'name': 'prog'}],
+                                                       'user': {'login': 'boss'}} for n in (7, 8)}}
+        self.data(board)
+        claude = {**self.env(), 'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_p'}
+        run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'next', 'programmer'], capture_output=True,
+                             text=True, env=claude)
+        self.assertIn(f'{REPO}#7 is yours now (local_p).', run.stdout)
+        self.assertIn('🤖 programmer · claude: taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn('--add-label', self.calls(['issue', 'edit'])[-1])
+        self.assertIn('claude', self.calls(['issue', 'edit'])[-1])
+        os.makedirs(self.config + '.state.json.waiting', exist_ok=True)  # local_p waits for its next task
+        with open(self.config + '.state.json.waiting/local_p', 'w') as f:
+            json.dump({'worker': 'local_p', 'roles': ['programmer']}, f)
+        board[REPO]['open'] = [issue(8, 'Logo', ['prog'])]
+        self.data(board)
+        self.assertNotIn('assign', self.run_tool('watch', '--once').stdout)  # no dispatcher wake for it
+
+    def test_stats_compare_the_teams(self):
+        claim = '\n<!-- agentq:claim h/x/1 -->'
+        def done(n, team, taken, closed):
+            return {'number': n, 'labels': [{'name': team}], 'closedAt': closed, 'stateReason': 'COMPLETED',
+                    'comments': [{'body': 'taking this.' + claim, 'createdAt': taken, 'author': {'login': 'bot'}}]}
+        self.data({REPO: {'closed': [done(1, 'claude', '2026-01-02T08:00:00Z', '2026-01-02T10:00:00Z'),
+                                     done(2, 'codex', '2026-01-02T08:00:00Z', '2026-01-02T09:00:00Z'),
+                                     {'number': 3, 'labels': [], 'closedAt': '2026-01-02T09:00:00Z', 'body': 'From the check of #1: wrong'}]}})
+        out = self.run_tool('stats').stdout
+        self.assertIn('claude | 1 | 2.0 | 1', out)
+        self.assertIn('codex | 1 | 1.0 | 0', out)
 
     def test_done_shows_the_owners_new_words_before_closing(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['prog', 'doing'])]},
@@ -662,7 +694,7 @@ class TeamTest(Base):
         self.assertIn(f"2. send this line to session local_p: `Task {REPO}#8 for programmer, from the owner's queue: "
                       f"run agentq brief {REPO}#8 and act on it.`", out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '8', '-R', REPO, '--add-label', 'prog',
-                                                             '--add-label', 'doing'])
+                                                             '--add-label', 'doing', '--add-label', 'claude'])
         self.data({REPO: {'open': [issue(9, 'Easy one')]}})
         self.assertIn('1. set_session_effort for session local_p: high', self.run_tool('assign', '9', 'programmer').stdout)
         self.assertNotIn('set_session', self.run_tool('assign', '9', 'programmer').stdout)
@@ -786,7 +818,8 @@ class TeamTest(Base):
         self.assertIn(f'{REPO}#50 created: reviewer checks #10.', out)
         made = self.calls(['issue', 'create'])[-1]
         self.assertIn('Check: #10', made)
-        self.assertEqual(made[made.index('--label') + 1:], ['reviewer', '--label', 'check batch', '--label', 'doing'])
+        self.assertEqual(made[made.index('--label') + 1:], ['reviewer', '--label', 'check batch', '--label', 'doing',
+                                                           '--label', 'claude'])
         self.assertIn(f'Commit: {head}', self.body(made))
         self.assertNotIn('#11', self.body(made))
         out = self.run_tool('batch', 'checker').stdout

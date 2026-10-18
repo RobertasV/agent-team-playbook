@@ -34,7 +34,9 @@ A checker: check each listed task at the pinned commit. Each problem → a new t
 
 New words from the owner on your task arrive the same way. A reminder that you hold a task while your session is quiet: carry on, or finish it now with one of the commands above. A message waits while you talk with the owner directly.
 
-Team sessions never message each other: the board carries everything (a hand-over is `route`, a question is `ask`). Only the dispatcher sends tasks. Exceptions: during install the programmer may message the sessions it starts, and any session may send the dispatcher "Start the watcher".
+**Your next task:** after you finish one, run `agentq next <role> --wait` – in Claude with run_in_background (it wakes you with the task; no tokens while waiting), in Codex in the foreground with `--max-minutes 55`. No work means you wait there; never look for work yourself.
+
+Team sessions never message each other and never offer to take part of a task someone else holds: the board carries everything (a hand-over is `route`, a question is `ask`, a finding is `agentq open`). Only the dispatcher sends tasks. Exceptions: during install the programmer may message the sessions it starts, and any session may send the dispatcher "Start the watcher".
 
 The owner stops or starts the team with one word to any team session:
 - "stop" → `agentq pause "<owner's words>"` – the watcher keeps running but sends nothing;
@@ -46,6 +48,7 @@ The owner never has to message the dispatcher. Never ask the dispatcher to stop 
 Each role can be worked by Claude sessions, by Codex workers, or by both at once, competing for the same tasks (claims keep two from taking one). The owner moves the work to whichever has tokens left, in one word to any session:
 - "Claude off" → `agentq team codex`; "Codex off" → `agentq team claude`; "both" → `agentq team both`.
 - "Codex workers" → `agentq codex-workers`: opens one Codex task per role in the Codex app, prefilled; the owner presses Send on each.
+- "Who works better?" → `agentq stats`: tasks done, hours from taking to closing, and problems the checkers found later, per team. Every task a worker takes gets the `claude` or `codex` label, and every comment says which team wrote it (`🤖 <role> · codex:`).
 The dispatcher keeps sorting tasks either way. A Codex worker loops: `agentq next <role> --wait --as <name>` (waits without tokens up to 9 minutes) → do the task → finish with one command (`agentq done` shows the owner's new words first) → again. Told to "join the agent team" in a project that has it (`.agentq.json`), start that loop.
 
 ## The owner's words

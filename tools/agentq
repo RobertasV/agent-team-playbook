@@ -1498,6 +1498,17 @@ def cmd_next(cfg, opts):
     if thread:  # the watcher wakes this Codex task when one of these roles has work
         record = {'thread': thread, 'host': host, 'roles': [r['role'] for r in wanted], 'next': again}
         update_state(cfg, lambda data: data.setdefault('codex', {}).__setitem__(worker, {**record, 'idle': None}))
+
+        def advance(data):  # `agentq codex-workers` opens the drafts one by one: this one started, open the next
+            drafts = data.get('codex_drafts') or {}
+            if drafts.get('queue') and drafts['queue'][0][1] == worker:
+                drafts['queue'].pop(0)
+                if drafts['queue']:
+                    return drafts['project'], drafts['queue'][0]
+                data.pop('codex_drafts')
+        following = update_state(cfg, advance)
+        if following:
+            open_codex_draft(following[0], *following[1])
     if not roles:
         if thread:
             update_state(cfg, lambda data: data['codex'][worker].__setitem__('idle', iso(now())))
@@ -2451,39 +2462,42 @@ def cmd_team(cfg, opts):
               'sharing a task.')
 
 
+CODEX_WORKER = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md '
+                'points to (section "Claude and Codex"). Run `{agentq} next {role} --as {name}`, do the task it gives you '
+                'by the skill and finish it with one agentq command, then run it again. When it says there is no task, '
+                'end your turn: agentq sends this task a message when there is work. Never wait or poll in a command – '
+                'in Codex that costs a model call every minute. No progress reports to the owner.')
+
+
+def open_codex_draft(project, role, name):
+    """A new Codex task under the project, prefilled; the owner presses Send. The app holds one such draft at a time."""
+    prompt = CODEX_WORKER.format(role=role, name=name, agentq=os.path.realpath(__file__))
+    query = urllib.parse.urlencode({'path': project, 'prompt': prompt}, quote_via=urllib.parse.quote)
+    subprocess.run([os.environ.get('AGENTQ_OPEN') or 'open', f'codex://threads/new?{query}'], capture_output=True)
+
+
 def cmd_workers(cfg, opts):
-    """Codex workers: one prefilled Codex task per pulling role (or `count` per role), opened in the Codex app where
-    codex-bridge exists – the owner presses Send. Opened ones are remembered, so a repeat opens only the missing."""
+    """Codex workers: one Codex task per pulling role (or `count` per role), listed under the project like Claude's
+    sessions. The Codex app holds one new-task draft at a time, so they open one by one: the owner presses Send, and
+    when that worker starts, the next draft opens by itself. Workers that already started are not opened again."""
     state = load_state(cfg)
-    have = state.setdefault('codex_opened', {})
-    project = cfg.get('checkout') or os.getcwd()
-    bridge = shutil_which('codex-bridge')
-    text = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md points '
-            'to (section "Claude and Codex"). Run `{agentq} next {role} --as {name}`, do the task it gives you by the '
-            'skill and finish it with one agentq command, then run it again. When it says there is no task, end your '
-            'turn: agentq sends this task a message when there is work. Never wait or poll in a command – in Codex that '
-            'costs a model call every minute. No progress reports to the owner.')
-    opened = []
-    for role in [r for r in cfg['roles'] if pulls(r)]:
-        for n in range(have.get(role['role'], 0) + 1, opts.count + 1):
-            name = f"codex-{role['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else '')
-            message = text.format(role=role['role'], name=name, agentq=os.path.realpath(__file__))
-            if bridge:
-                run = subprocess.run([bridge, 'new', '--draft', '--cwd', project, '--message', message],
-                                     capture_output=True, text=True)
-                if run.returncode != 0:
-                    raise Fail(f'codex-bridge: {run.stderr.strip() or run.stdout.strip()}')
-            else:
-                print(f'{name}: open a Codex task in {project} with: {message}')
-            opened.append(name)
-            have[role['role']] = n
-    save_state(cfg, state)
-    if not [r for r in cfg['roles'] if pulls(r)]:
+    roles = [r for r in cfg['roles'] if pulls(r)]
+    if not roles:
         print('no role takes Codex workers – `agentq team both` (or `agentq role <name> --agent both`) first.')
-    elif opened and bridge:
-        print(f"{len(opened)} Codex task(s) opened in the Codex app, prefilled ({', '.join(opened)}): press Send on each.")
-    elif not opened:
-        print('every role already has its Codex workers; none missing.')
+        return
+    have = state.get('codex', {})
+    names = [[r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else '')]
+             for r in roles for n in range(1, opts.count + 1)]
+    missing = [x for x in names if x[1] not in have]
+    if not missing:
+        print('every role already has its Codex worker; none missing.')
+        return
+    project = cfg.get('checkout') or os.getcwd()
+    state['codex_drafts'] = {'project': project, 'queue': missing}
+    save_state(cfg, state)
+    open_codex_draft(project, *missing[0])
+    print(f"The Codex app shows a new task for {missing[0][1]}: press Send. Each next one opens by itself once the one "
+          f"before starts – {len(missing)} in all ({', '.join(x[1] for x in missing)}).")
 
 
 def cmd_stats(cfg, opts):

@@ -511,19 +511,18 @@ class TeamTest(Base):
                                                        'user': {'login': 'boss'}}}})
         self.assertIn(f'{REPO}#9 is yours now (w1).', self.run_tool('next', '--as', 'w1').stdout)
 
-    def test_codex_workers_one_per_role_opened_once(self):
-        bridge = os.path.join(self.dir.name, 'bin', 'codex-bridge')
-        with open(bridge, 'w') as f:
-            f.write(f'#!/bin/sh\necho "$@" >> {self.dir.name}/bridge.log\n')
-        os.chmod(bridge, 0o755)
+    def test_codex_workers_open_one_by_one_like_sessions(self):
         self.data({REPO: {'open': []}})
         self.run_tool('team', 'both')
-        self.assertIn('3 Codex task(s) opened', self.run_tool('codex-workers').stdout)
+        self.assertIn('new task for codex-programmer: press Send', self.run_tool('codex-workers').stdout)
+        self.assertEqual(self.faked('open').count('codex://threads/new?'), 1)  # the app holds one draft at a time
+        self.assertIn('next%20programmer%20--as%20codex-programmer', self.faked('open'))
+        self.as_codex('next', 'programmer', '--as', 'codex-programmer', thread='t1')  # pressed Send: it started
+        self.assertIn('--as%20codex-designer', self.faked('open'))  # so the next draft opened by itself
+        self.as_codex('next', 'designer', '--as', 'codex-designer', thread='t2')
+        self.as_codex('next', 'checker', '--as', 'codex-checker', thread='t3')
+        self.assertEqual(self.faked('open').count('codex://threads/new?'), 3)
         self.assertIn('none missing', self.run_tool('codex-workers').stdout)
-        log = open(os.path.join(self.dir.name, 'bridge.log')).read()
-        self.assertIn('next programmer --as codex-programmer', log)
-        self.assertIn('end your turn', log)
-        self.assertEqual(log.count('new --draft'), 3)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
         self.data({REPO: {'open': []}})

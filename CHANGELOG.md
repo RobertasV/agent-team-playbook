@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.48 – 2026-10-18
+- `agentq codex-workers` opens the Codex worker tasks one by one, listed under the project like Claude's sessions: the Codex app holds one new-task draft at a time, so the next draft opens by itself when the worker before it starts. No codex-bridge needed.
+
 ## 0.2.47 – 2026-10-18
 - `assign` no longer sends a task to a session that waits in `agentq next`: it queues it and that session takes it itself (seen live: a programmer held two tasks at once – one pushed, one pulled).
 

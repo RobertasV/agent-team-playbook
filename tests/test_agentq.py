@@ -573,6 +573,9 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.assertIn('End your turn here', self.as_codex('next', 'designer', '--wait', '--as', 'cx').stdout)  # never waits
         self.assertEqual(self.state()['codex']['cx']['thread'], 't1')
+        self.as_codex('next', 'designer', '--as', 'cy')  # the same Codex task under a new name: still one worker
+        self.assertEqual(list(self.state()['codex']), ['cy'])
+        self.as_codex('next', 'designer', '--as', 'cx')
         board = {REPO: {'open': [issue(7, 'Icon', ['design'])]}}
         self.data(board)
         self.assertNotIn('designer', self.run_tool('watch', '--once').stdout)  # no dispatcher wake: the watcher sent it

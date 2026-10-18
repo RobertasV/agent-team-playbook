@@ -1497,7 +1497,13 @@ def cmd_next(cfg, opts):
                       '--as', shlex_quote(worker)])
     if thread:  # the watcher wakes this Codex task when one of these roles has work
         record = {'thread': thread, 'host': host, 'roles': [r['role'] for r in wanted], 'next': again}
-        update_state(cfg, lambda data: data.setdefault('codex', {}).__setitem__(worker, {**record, 'idle': None}))
+
+        def register(data):  # one Codex task is one worker: a new name for the same task replaces the old one
+            workers = data.setdefault('codex', {})
+            for other in [w for w, i in workers.items() if i.get('thread') == thread and w != worker]:
+                del workers[other]
+            workers[worker] = {**record, 'idle': None}
+        update_state(cfg, register)
 
         def advance(data):  # `agentq codex-workers` opens the drafts one by one: this one started, open the next
             drafts = data.get('codex_drafts') or {}

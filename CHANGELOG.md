@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.49 – 2026-10-18
+- One Codex task is one worker: registering it under a new name replaces the old name, so the watcher never wakes one task for two tasks.
+
 ## 0.2.48 – 2026-10-18
 - `agentq codex-workers` opens the Codex worker tasks one by one, listed under the project like Claude's sessions: the Codex app holds one new-task draft at a time, so the next draft opens by itself when the worker before it starts. No codex-bridge needed.
 

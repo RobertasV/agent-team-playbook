@@ -1209,7 +1209,8 @@ def render_roles(cfg, lessons):
             lines += [f"- {e['issue']} {e['title']} → {e['to']}" for e in moved]
         lines.append('')
     lines.append('## Rules')
-    lines += [f"- {r['text']} ({r['by']})" for r in lessons['rules']] or ['- none yet']
+    names = {r['role'] for r in cfg['roles']}
+    lines += [f"- {r['text']} ({r['by']})" for r in lessons['rules'] if r.get('role') in names | {None}] or ['- none yet']
     return '\n'.join(lines) + '\n'
 
 
@@ -1859,6 +1860,14 @@ def cmd_role(cfg, opts):
     cfg = save_config(cfg, change)
     if len(cfg['roles']) == 0 or default_role(cfg) is None:
         raise Fail('the default role is gone')
+    if opts.remove:  # its rules and lessons would send tasks to a role that no longer exists
+        lessons = load_lessons(cfg)
+        kept = [r for r in lessons['rules'] if (r.get('role') or '').lower() != name.lower()]
+        if len(kept) != len(lessons['rules']) or name in lessons['examples']:
+            lessons['rules'] = kept
+            lessons['examples'].pop(name, None)
+            save_lessons(cfg, lessons)
+            print(f'rules and lessons for {name} removed')
     if not opts.remove:
         ensure_labels(cfg)
     if cfg['dispatcher']['folder'] and os.path.isdir(cfg['team_dir']):

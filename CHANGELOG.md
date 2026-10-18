@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.30 – 2026-10-18
+- Removing a role removes its rules and lessons; roles.md never shows a rule for a role that no longer exists.
+
 ## 0.2.29 – 2026-10-18
 - Run from a folder outside the project (a session's scratch folder), agentq finds the project's config through the session that ran it.
 

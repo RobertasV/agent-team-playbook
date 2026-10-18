@@ -741,7 +741,9 @@ class TeamTest(Base):
         self.assertIn('marketer', [c[2] for c in self.calls(['label', 'create'])])
         self.assertTrue(os.path.exists(os.path.join(self.dir.name, 'disp', 'examples', 'marketer-1.png')))
         self.assertIn('reference screenshot: examples/marketer-1.png', self.run_tool('roles').stdout)
-        self.run_tool('role', 'checker', '--remove')
+        self.run_tool('teach', 'audits → checker')
+        self.assertIn('rules and lessons for checker removed', self.run_tool('role', 'checker', '--remove').stdout)
+        self.assertNotIn('audits', self.run_tool('roles').stdout)
         with open(self.config) as f:
             self.assertNotIn('checker', [r['role'] for r in json.load(f)['roles']])
 

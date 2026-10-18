@@ -1616,6 +1616,8 @@ def wake_codex(cfg, state, repo, issues, start):
                  and not (turns.get(r['role']) == 'codex' and waiting_workers(cfg, r))]
         if not any(next_issue(cfg, issues, r, taken) or r['mode'] == 'checker' for r in roles):
             continue
+        if not codex_activity(info['thread']):
+            continue  # the owner archived or deleted this Codex task: it gets nothing
         if not codex_reachable(info['thread']):
             continue  # Codex is closed: the task waits for Claude, or until the owner opens Codex
         if not update_state(cfg, lambda data: reserve_codex(data, worker, seen, (None, None))):

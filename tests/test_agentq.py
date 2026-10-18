@@ -583,6 +583,9 @@ class TeamTest(Base):
         self.as_codex('next', 'designer', '--as', 'cx')
         board = {REPO: {'open': [issue(7, 'Icon', ['design'])]}}
         self.data(board)
+        self.run_tool('watch', '--once', env={'CODEX_HOME': os.path.join(self.dir.name, 'none')})
+        self.assertEqual(self.faked('codex'), '')  # its Codex task was archived or deleted: nothing sent
+        self.rollout('t1', T0)
         self.assertNotIn('designer', self.run_tool('watch', '--once').stdout)  # no dispatcher wake: the watcher sent it
         self.assertIn(f'queue --thread t1 --message Task {REPO}#7 for designer is yours now (worker cx)', self.faked('codex'))
         self.assertIn('next designer --as cx', self.faked('codex'))
@@ -601,6 +604,7 @@ class TeamTest(Base):
         self.run_tool('role', 'designer', '--agent', 'codex')
         self.data({REPO: {'open': []}})
         self.as_codex('next', 'designer', '--as', 'cx')
+        self.rollout('t1', T0)
         with open(os.path.join(self.dir.name, 'bin', 'fake-codex'), 'w') as f:
             f.write('#!/bin/sh\necho "no such thread" >&2\nexit 1\n')
         self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
@@ -616,6 +620,7 @@ class TeamTest(Base):
         self.run_tool('role', 'designer', '--agent', 'codex')
         self.data({REPO: {'open': []}})
         self.as_codex('next', 'designer', '--as', 'cx')
+        self.rollout('t1', T0)
         with open(os.path.join(self.dir.name, 'bin', 'fake-open'), 'w') as f:
             f.write('#!/bin/sh\nexit 1\n')
         self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
@@ -664,6 +669,7 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.run_tool('team', 'both')
         self.as_codex('next', 'programmer', '--as', 'cx')
+        self.rollout('t1', T0)
         os.makedirs(self.config + '.state.json.waiting', exist_ok=True)  # the Claude session local_p waits too
         with open(self.config + '.state.json.waiting/local_p', 'w') as f:
             json.dump({'worker': 'local_p', 'roles': ['programmer']}, f)

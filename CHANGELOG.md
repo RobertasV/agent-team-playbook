@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.54 – 2026-10-18
+- A Codex worker whose task the owner archived or deleted is never woken, so no task waits on it. To keep Codex off a role: `agentq role <role> --agent claude`, then archive its Codex task.
+
 ## 0.2.53 – 2026-10-18
 - Codex workers get the role's reasoning effort (extra high by default): `agentq codex-workers` names it per worker and the skill passes it to `create_thread` (the first ones ran at Codex's default, medium).
 

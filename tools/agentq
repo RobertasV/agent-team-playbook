@@ -813,7 +813,7 @@ def session_activity(cfg, session):
     return dt.datetime.fromtimestamp(max(os.path.getmtime(f) for f in files), dt.timezone.utc).replace(microsecond=0)
 
 
-def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind):
+def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=True):
     """One reminder for a holder that went quiet; still quiet escalate_minutes later: the owner is told and the task
     goes back to the queue, so a free worker takes it."""
     nudges = state.setdefault('nudges', {})
@@ -830,9 +830,10 @@ def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind):
         problem = cfg['texts']['stalled'].format(role=role['role'], ref=ref, session=who, last=iso(last), at=nudge['at'])
         report_health(cfg, state, [problem], needs_owner=True, close=False)
         nudge['told'] = iso(start)
-        number = int(ref.split('#')[1])
-        comment(cfg, repo, number, cfg['texts']['released'].format(session=who, last=iso(last)), 'health')
-        relabel(repo, number, remove=[cfg['labels']['working']])
+        if release:
+            number = int(ref.split('#')[1])
+            comment(cfg, repo, number, cfg['texts']['released'].format(session=who, last=iso(last)), 'health')
+            relabel(repo, number, remove=[cfg['labels']['working']])
 
 
 def check_held(cfg, state, repo, issues, start, plan):
@@ -853,7 +854,7 @@ def check_held(cfg, state, repo, issues, start, plan):
                 last = codex_activity(codex['thread']) if codex.get('host') == socket.gethostname() else None
                 if last:
                     quiet_holder(cfg, state, repo, ref, role, holder, last, start,
-                                 lambda: message_codex(codex['thread'], nudge_text(cfg, ref, iso(last))))
+                                 lambda: message_codex(codex['thread'], nudge_text(cfg, ref, iso(last))), release=False)
                 continue
             if not pushes(role) or (holder and holder not in role['sessions']):
                 continue  # another worker holds it: no session to watch here; health reports a stuck task
@@ -1209,26 +1210,28 @@ def codex_activity(thread):
 def message_codex(thread, text):
     """Queue a message for a Codex task; it runs as soon as the task is idle. A task the Codex app has not loaded
     (e.g. after the app restarted) is opened in the background, without taking focus, so the app loads it and runs
-    the message. Returns what went wrong, or None."""
+    the message. Returns (accepted, what went wrong): a message Codex may have accepted is never sent twice."""
     cli = codex_cli()
     if not cli:
-        return 'no Codex CLI found (set AGENTQ_CODEX to its path)'
+        return False, 'no Codex CLI found (set AGENTQ_CODEX to its path)'
     try:
         run = subprocess.run([cli, 'queue', '--thread', thread, '--message', text], capture_output=True, text=True,
                              timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return f'codex queue: {e}'
+    except OSError as e:
+        return False, f'codex queue: {e}'
+    except subprocess.TimeoutExpired:
+        return True, 'codex queue did not answer in 60 s – the message may be queued'
     if run.returncode != 0:
-        return one_line(run.stderr or run.stdout or f'codex queue exited with {run.returncode}', 300)
+        return False, one_line(run.stderr or run.stdout or f'codex queue exited with {run.returncode}', 300)
     if not codex_loaded(thread) and codex_app_running():
         try:
             opened = subprocess.run([os.environ.get('AGENTQ_OPEN') or 'open', '-g', f'codex://threads/{thread}'],
                                     capture_output=True, text=True, timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
-            return f'queued, but opening the task failed: {e}'
+            return True, f'queued, but opening the task failed: {e}'
         if opened.returncode != 0:
-            return f'queued, but opening the task failed: {one_line(opened.stderr or str(opened.returncode), 200)}'
-    return None
+            return True, f'queued, but opening the task failed: {one_line(opened.stderr or str(opened.returncode), 200)}'
+    return True, None
 
 
 def start_codex_watcher(cfg, opts, who):
@@ -1318,8 +1321,8 @@ def cmd_watch(cfg, opts):
             if plan and body == last.get('plan') and start - parse_time(last['sent']) < dt.timedelta(minutes=cfg['repeat_minutes']):
                 plan = None  # the dispatcher did not act on this plan: do not wake it every minute for it
             elif plan and opts.wake:  # a Codex dispatcher: the plan goes to its task as a message
-                error = message_codex(state.get('dispatcher_thread') or '-', text)
-                if error:
+                accepted, error = message_codex(state.get('dispatcher_thread') or '-', text)
+                if not accepted:
                     work['watch']['error'] = f'the plan did not reach the dispatcher: {error}'
                     plan = None  # tried again at the next poll
             if plan:
@@ -1522,16 +1525,6 @@ def cmd_next(cfg, opts):
             workers[worker] = {**record, 'idle': None}
         update_state(cfg, register)
 
-        def advance(data):  # `agentq codex-workers` opens the drafts one by one: this one started, open the next
-            drafts = data.get('codex_drafts') or {}
-            if drafts.get('queue') and drafts['queue'][0][1] == worker:
-                drafts['queue'].pop(0)
-                if drafts['queue']:
-                    return drafts['project'], drafts['queue'][0]
-                data.pop('codex_drafts')
-        following = update_state(cfg, advance)
-        if following:
-            open_codex_draft(following[0], *following[1])
     if not roles:
         if thread:
             update_state(cfg, lambda data: data['codex'][worker].__setitem__('idle', iso(now())))
@@ -1639,9 +1632,11 @@ def wake_codex(cfg, state, repo, issues, start):
             if issue['number'] == number:
                 issue['labels'] = issue['labels'] + [{'name': cfg['labels']['working']}]
         text = cfg['texts']['wake_task'].format(ref=ref, role=role['role'], worker=worker,
-                                                agentq=os.path.realpath(__file__), next=info.get('next'))
-        error = message_codex(info['thread'], text)
-        if error:  # undone: the task back in the queue, the worker idle again for the next poll
+                                                agentq=shlex_quote(os.path.realpath(__file__)), next=info.get('next'))
+        accepted, error = message_codex(info['thread'], text)
+        if accepted:  # it may run any moment: the task stays its own; a reminder follows if it stays quiet
+            info['error'] = error
+        else:  # undone: the task back in the queue, the worker idle again for the next poll
             comment(cfg, repo, number, cfg['texts']['codex_unreached'].format(worker=worker, error=error), 'health')
             relabel(repo, number, remove=[cfg['labels']['working']])
 
@@ -2499,36 +2494,27 @@ CODEX_WORKER = ('You are the Codex {role} of the agent team in this project (wor
                 'in Codex that costs a model call every minute. No progress reports to the owner.')
 
 
-def open_codex_draft(project, role, name):
-    """A new Codex task under the project, prefilled; the owner presses Send. The app holds one such draft at a time."""
-    prompt = CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name), agentq=shlex_quote(os.path.realpath(__file__)))
-    query = urllib.parse.urlencode({'path': project, 'prompt': prompt}, quote_via=urllib.parse.quote)
-    subprocess.run([os.environ.get('AGENTQ_OPEN') or 'open', f'codex://threads/new?{query}'], capture_output=True)
-
-
 def cmd_workers(cfg, opts):
-    """Codex workers: one Codex task per pulling role (or `count` per role), listed under the project like Claude's
-    sessions. The Codex app holds one new-task draft at a time, so they open one by one: the owner presses Send, and
-    when that worker starts, the next draft opens by itself. Workers that already started are not opened again."""
-    state = load_state(cfg)
+    """Codex workers: one Codex task per pulling role (or `count` per role). Only the owner can create a Codex task that
+    is listed under the project (New task), so this prints what to paste into each; workers already running on this
+    computer are left out, an archived or deleted one counts as missing."""
     roles = [r for r in cfg['roles'] if pulls(r)]
     if not roles:
         print('no role takes Codex workers – `agentq team both` (or `agentq role <name> --agent both`) first.')
         return
-    have = {w for w, i in state.get('codex', {}).items()
-            if i.get('host') != socket.gethostname() or codex_activity(i['thread'])}  # archived or deleted: missing
-    names = [[r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else '')]
+    host = socket.gethostname()
+    have = {w for w, i in load_state(cfg).get('codex', {}).items() if i.get('host') == host and codex_activity(i['thread'])}
+    names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if opts.count > 1 else ''))
              for r in roles for n in range(1, opts.count + 1)]
     missing = [x for x in names if x[1] not in have]
     if not missing:
         print('every role already has its Codex worker; none missing.')
         return
     project = cfg.get('checkout') or os.getcwd()
-    state['codex_drafts'] = {'project': project, 'queue': missing}
-    save_state(cfg, state)
-    open_codex_draft(project, *missing[0])
-    print(f"The Codex app shows a new task for {missing[0][1]}: press Send. Each next one opens by itself once the one "
-          f"before starts – {len(missing)} in all ({', '.join(x[1] for x in missing)}).")
+    print(f"In the Codex app, in the project {project}, press New task once per worker and send its text:")
+    for role, name in missing:
+        print(f"\n--- {name} ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
+                                                          agentq=shlex_quote(os.path.realpath(__file__))))
 
 
 def cmd_stats(cfg, opts):

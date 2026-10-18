@@ -511,23 +511,22 @@ class TeamTest(Base):
                                                        'user': {'login': 'boss'}}}})
         self.assertIn(f'{REPO}#9 is yours now (w1).', self.run_tool('next', '--as', 'w1').stdout)
 
-    def test_codex_workers_open_one_by_one_like_sessions(self):
+    def test_codex_workers_prints_what_to_paste_for_the_missing_ones(self):
         self.data({REPO: {'open': []}})
         self.run_tool('team', 'both')
-        self.assertIn('new task for codex-programmer: press Send', self.run_tool('codex-workers').stdout)
-        self.assertEqual(self.faked('open').count('codex://threads/new?'), 1)  # the app holds one draft at a time
-        self.assertIn('next%20programmer%20--as%20codex-programmer', self.faked('open'))
-        self.as_codex('next', 'programmer', '--as', 'codex-programmer', thread='t1')  # pressed Send: it started
-        self.assertIn('--as%20codex-designer', self.faked('open'))  # so the next draft opened by itself
-        self.as_codex('next', 'designer', '--as', 'codex-designer', thread='t2')
-        self.as_codex('next', 'checker', '--as', 'codex-checker', thread='t3')
-        self.assertEqual(self.faked('open').count('codex://threads/new?'), 3)
-        for thread in ('t1', 't2', 't3'):
+        out = self.run_tool('codex-workers').stdout
+        self.assertIn('press New task once per worker', out)
+        self.assertIn('next programmer --as codex-programmer', out)
+        self.assertIn('end your turn', out)
+        for role, thread in (('programmer', 't1'), ('designer', 't2'), ('checker', 't3')):
+            self.as_codex('next', role, '--as', f'codex-{role}', thread=thread)
             self.rollout(thread, T0)
         self.assertIn('none missing', self.run_tool('codex-workers').stdout)
         os.remove(os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02',
                                'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
-        self.assertIn('new task for codex-designer', self.run_tool('codex-workers').stdout)
+        out = self.run_tool('codex-workers').stdout
+        self.assertIn('--- codex-designer ---', out)
+        self.assertNotIn('--- codex-programmer ---', out)
 
     def test_claude_sessions_and_codex_workers_compete_for_a_role(self):
         self.data({REPO: {'open': []}})
@@ -611,6 +610,19 @@ class TeamTest(Base):
         self.assertEqual(state.get('holders', {}), {})
         self.assertTrue(state['codex']['cx']['idle'])  # woken again at the next poll
 
+    def test_a_queued_wake_stays_even_when_opening_the_task_fails(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': []}})
+        self.as_codex('next', 'designer', '--as', 'cx')
+        with open(os.path.join(self.dir.name, 'bin', 'fake-open'), 'w') as f:
+            f.write('#!/bin/sh\nexit 1\n')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
+        self.run_tool('watch', '--once')
+        state = self.state()
+        self.assertEqual(state['holders'], {f'{REPO}#7': 'cx'})  # the message is queued: never a second taker
+        self.assertIn('opening the task failed', state['codex']['cx']['error'])
+
     def test_with_codex_closed_its_workers_get_nothing(self):
         self.data({REPO: {'labels': []}})
         self.run_tool('role', 'designer', '--agent', 'codex')
@@ -644,9 +656,8 @@ class TeamTest(Base):
         self.assertIn('no work', self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout)  # no dispatcher
         self.assertIn(f"queue --thread t1 --message You hold {REPO}#7 ('doing')", self.faked('codex'))
         self.run_tool('watch', '--once', now='2026-01-02T12:46:00Z')
-        self.assertIn('ask owner', self.calls(['issue', 'create'])[-1])
-        self.assertIn('back in the queue: its session (cx)', self.body(self.calls(['issue', 'comment'])[-1]))
-        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'])
+        self.assertIn('ask owner', self.calls(['issue', 'create'])[-1])  # the owner is told
+        self.assertNotIn(['issue', 'edit', '7', '-R', REPO, '--remove-label', 'doing'], self.calls(['issue', 'edit']))
 
     def test_claude_and_codex_take_turns_when_both_wait(self):
         self.data({REPO: {'open': []}})

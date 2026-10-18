@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.51 – 2026-10-18
+- From the second Codex review: a wake message Codex may have accepted (queued, or no answer in time) is never undone or sent again – only a refused one puts the task back; a quiet Codex worker gets a reminder and the owner is told, but its task is no longer taken away by its rollout file's time alone.
+- `agentq codex-workers` prints the text for each missing Codex worker: only the owner can create a Codex task listed under the project (drafts opened from outside replaced each other).
+
 ## 0.2.50 – 2026-10-18
 - From a Codex review of the Codex part: a wake that fails is undone (the task back in the queue, the worker idle again); `codex queue`, `open` and `lsof` have time limits and a failed `open` is reported; a Codex dispatcher's watcher is reported running only once it holds its lock; an archived or deleted Codex worker counts as missing for `codex-workers`; paths and role names in Codex commands are shell-quoted; the skill says a team Codex task needs full access.
 

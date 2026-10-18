@@ -719,6 +719,17 @@ class TeamTest(Base):
         edit = [c for c in self.calls(['issue', 'edit']) if c[2] == '20'][-1]
         self.assertIn('later', edit[edit.index('--remove-label') + 1:])
 
+    def test_taking_a_task_again_clears_the_question_and_records_who_holds_it(self):
+        self.data({REPO: {'labels': []}})
+        self.run_tool('role', 'designer', '--agent', 'codex')
+        self.data({REPO: {'open': []}})
+        self.as_codex('next', 'designer', '--as', 'cx')
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design', 'ask owner'])]}})
+        self.as_codex('take', '7')  # the owner answered in the Codex chat
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label', 'doing',
+                                                             '--remove-label', 'ask owner'])
+        self.assertEqual(self.state()['holders'], {f'{REPO}#7': 'cx'})
+
     def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
         from importlib.machinery import SourceFileLoader
         import importlib.util

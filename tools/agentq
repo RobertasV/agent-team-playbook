@@ -586,9 +586,18 @@ def cmd_queue(cfg, opts):
 
 
 def cmd_take(cfg, opts):
+    """Start (or resume) a task: working again, no longer waiting for the owner, held by this session or Codex task."""
     repo, number = resolve(cfg, opts.issue)
-    comment(cfg, repo, number, cfg['texts']['take'], holder(cfg, view(repo, number)))
-    relabel(repo, number, add=[cfg['labels']['working']])
+    issue = view(repo, number)
+    labels = cfg['labels']
+    comment(cfg, repo, number, cfg['texts']['take'], holder(cfg, issue))
+    relabel(repo, number, add=[labels['working']],
+            remove=[n for n in {labels['question'], labels['owner_word']} if n in labels_of(issue)])
+    here = running_in()
+    worker = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if here == 'claude' else \
+        codex_here(read_state_file(cfg))[0] if here == 'codex' else None
+    if worker:  # so reminders and the owner's words go to whoever really works on it
+        update_state(cfg, lambda data: data.setdefault('holders', {}).__setitem__(f'{repo}#{number}', worker))
     print(f'{repo}#{number}: taken')
 
 

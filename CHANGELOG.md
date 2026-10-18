@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.60 – 2026-10-18
+- `agentq take` (resuming a task, e.g. after the owner answered in chat) removes the waiting-for-the-owner label and records the session or Codex task as the holder – seen live: a Codex worker resumed a task that kept "needs you", and with no holder the reminders would have gone to a Claude session.
+
 ## 0.2.59 – 2026-10-18
 - The release role owns the release cycle: candidate tag `-rc1` on the approved commit, its own full check there, fixes through linked programmer tasks, a new `-rcN` checked again in full, GO only for the final candidate (from a Codex review of the release flow).
 

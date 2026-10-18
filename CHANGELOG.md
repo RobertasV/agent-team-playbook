@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.23 – 2026-10-18
+- Plans name the target session by id only ("send this line to session local_…"); the dispatcher stopped doubting ids it remembered under another role's name.
+
 ## 0.2.22 – 2026-10-18
 - `agentq scale <role> N`: N sessions of a role work in parallel. More than exist: it lists the numbered sessions to start (in the team's sidebar group) and `role --add-session` records them. Fewer: the rest rest – no new tasks, never deleted – and are reused first when the number grows again.
 

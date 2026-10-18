@@ -300,8 +300,8 @@ def checked_label(cfg, role):
 
 
 def session_of(role, sid=None):
-    """A role session as plans name it: the role, then its id – never the dispatcher's own."""
-    return f"{role['role']} ({sid or role['session'] or 'no session id in the config – run setup'})"
+    """The session a plan sends to, by id only: a name invites the dispatcher to doubt it against names it remembers."""
+    return f"session {sid or role['session'] or '(none in the config for ' + role['role'] + ' – run setup)'}"
 
 
 def capacity(role):

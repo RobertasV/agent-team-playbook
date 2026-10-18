@@ -66,6 +66,9 @@ Several processes write the state file (the watcher, workers, the dispatcher's c
 
 ## Claude and Codex
 
+Two lives, the tickets between them (owner, 2026-10-18): the Claude team (its dispatcher and sessions) and the Codex team (its dispatcher and workers) run side by side and never message each other. Both dispatchers sort the same new issues – the first `assign` wins, the second sees the task taken – and the workers of both compete for tasks through claims. The Codex dispatcher's plan holds only sorting steps, and its `assign` only queues: it cannot reach Claude sessions, so it never takes a task for one.
+
+
 Decided by the owner on 2026-10-18: Claude and Codex each have their own workers for the same roles and compete for the same tasks; the owner shifts the work to whichever has tokens left (`agentq team claude|codex|both`). A role's agent is claude (the dispatcher sends to its sessions), codex (its workers pull with `agentq next`) or both. Claims keep two workers from taking one task; a task a Codex worker holds does not count against the Claude sessions' capacity, and its new owner words reach it through `agentq done`. The dispatcher keeps running in every mode; Codex worker tasks are opened prefilled (`agentq codex-workers`) and started by the owner.
 
 ## Many computers

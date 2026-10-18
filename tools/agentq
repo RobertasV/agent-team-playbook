@@ -1306,6 +1306,8 @@ def cmd_watch(cfg, opts):
             continue
         try:
             plan = build_plan(cfg, work, start)
+            if here == 'codex':  # the Codex life: it sorts tasks; Claude sessions are the Claude dispatcher's to reach
+                plan = [step for step in plan if step[0] in ('classify', 'answered')]
         except Fail as e:
             state['watch'] = {'pid': os.getpid(), 'beat': iso(start), 'error': str(e)}
             save_state(cfg, state)
@@ -1667,7 +1669,10 @@ def cmd_assign(cfg, opts):
     remove += [n for n in {labels['question'], labels['owner_word']} if n in names]  # the owner answered
     state = load_state(cfg)
     who = cfg['dispatcher']['name']
-    if not pushes(role):
+    if labels['working'] in names and role['label'] in names:
+        print(f"{ref} is already being worked on as {role['role']} – nothing to do.")  # the other dispatcher was first
+        return
+    if not pushes(role) or running_in() == 'codex':  # a Codex dispatcher cannot reach Claude sessions: workers pull
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, in its queue; it takes its tasks itself (agentq next). Nothing to send.")

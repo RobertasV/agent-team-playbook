@@ -692,6 +692,18 @@ class TeamTest(Base):
         self.assertIn('Last: end your turn – the watcher keeps running', self.faked('codex'))
         self.assertNotIn('plan sent', self.run_tool('watch', '--wake', '--once', now=T1).stdout)  # sent once
 
+    def test_two_lives_the_codex_dispatcher_only_sorts_and_never_takes_for_claude(self):
+        self.data({REPO: {'open': [issue(1, 'Old bug', ['prog']), issue(4, 'Something new')]}})
+        self.run_tool('team', 'both')
+        codex = self.run_tool('watch', '--once', env={'CODEX_THREAD_ID': 'd1'}).stdout
+        self.assertIn(f'classify {REPO}#4', codex)
+        self.assertNotIn('next task for programmer', codex)  # Claude sessions are the Claude dispatcher's
+        self.data({REPO: {'open': [issue(4, 'Something new')]}})
+        out = self.run_tool('assign', '4', 'programmer', env={'CODEX_THREAD_ID': 'd1'}).stdout
+        self.assertIn('in its queue', out)  # a worker of either life takes it
+        self.data({REPO: {'open': [issue(4, 'Something new', ['prog', 'doing'])]}})
+        self.assertIn('already being worked on', self.run_tool('assign', '4', 'programmer').stdout)
+
     def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
         from importlib.machinery import SourceFileLoader
         import importlib.util

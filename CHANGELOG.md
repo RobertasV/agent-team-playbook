@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.55 – 2026-10-18
+- Two lives, the tickets between them: a Codex dispatcher's plan only sorts (classify, answered) and its `assign` only queues – it never takes a task for a Claude session it cannot reach; `assign` of a task the other dispatcher already started does nothing.
+
 ## 0.2.54 – 2026-10-18
 - A Codex worker whose task the owner archived or deleted is never woken, so no task waits on it. To keep Codex off a role: `agentq role <role> --agent claude`, then archive its Codex task.
 

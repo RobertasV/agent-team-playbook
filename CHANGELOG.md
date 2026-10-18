@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.61 – 2026-10-18
+- A Claude session's activity also counts the app's own last-activity time, not only its transcript: a session running a long test run looked quiet and its tasks were released while it worked.
+
 ## 0.2.60 – 2026-10-18
 - `agentq take` (resuming a task, e.g. after the owner answered in chat) removes the waiting-for-the-owner label and records the session or Codex task as the holder – seen live: a Codex worker resumed a task that kept "needs you", and with no holder the reminders would have gone to a Claude session.
 

@@ -813,13 +813,15 @@ def session_activity(cfg, session):
     metas = glob.glob(os.path.join(glob.escape(cfg['app_sessions']), '*', '*', f'{glob.escape(session)}.json'))
     try:
         with open(max(metas, key=os.path.getmtime), encoding='utf-8') as f:
-            cli = json.load(f).get('cliSessionId')
+            meta = json.load(f)
     except (ValueError, OSError):
         return None
-    files = glob.glob(os.path.join(glob.escape(cfg['transcripts']), '*', f'{glob.escape(cli or "-")}.jsonl'))
+    files = glob.glob(os.path.join(glob.escape(cfg['transcripts']), '*', f'{glob.escape(meta.get("cliSessionId") or "-")}.jsonl'))
     if not files:
         return None
-    return dt.datetime.fromtimestamp(max(os.path.getmtime(f) for f in files), dt.timezone.utc).replace(microsecond=0)
+    # the app's own activity time as well: a long test run writes nothing to the transcript for a while
+    seen = [os.path.getmtime(f) for f in files] + [(meta.get('lastActivityAt') or 0) / 1000]
+    return dt.datetime.fromtimestamp(max(seen), dt.timezone.utc).replace(microsecond=0)
 
 
 def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=True):

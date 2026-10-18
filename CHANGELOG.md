@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.41 – 2026-10-18
+- An install run in Codex always does the Codex part of step 5, even when the team already runs on Claude: it asks which roles work in Codex, switches them, and starts working.
+
 ## 0.2.40 – 2026-10-18
 - One Codex worker for the whole team: `agentq next --wait` without a role takes the next task of any pulling role (priority first).
 - Install in Codex as in Claude: one line, the same steps and questions; step 5 makes the roles pull, opens a Codex dispatcher task when there is no Claude one, and the installing task becomes the first worker ("Join the agent team in this project" adds more).

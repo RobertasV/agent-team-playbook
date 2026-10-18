@@ -180,6 +180,20 @@ class AgentqTest(Base):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(self.calls(['issue', 'edit'])[0][:3], ['issue', 'edit', '5'])
 
+    def test_from_a_scratch_folder_the_config_is_found_through_the_session(self):
+        project = os.path.join(self.dir.name, 'project')
+        scratch = os.path.join(self.dir.name, 'scratch')
+        os.makedirs(project)
+        os.makedirs(scratch)
+        os.symlink(self.config, os.path.join(project, '.agentq.json'))
+        meta = os.path.join(self.dir.name, 'app', 'a', 'o')
+        os.makedirs(meta)
+        with open(os.path.join(meta, 'local_me.json'), 'w') as f:
+            json.dump({'sessionId': 'local_me', 'cwd': project}, f)
+        run = subprocess.run([sys.executable, TOOL, 'take', '5'], capture_output=True, text=True, cwd=scratch,
+                             env={**self.env(), 'CLAUDE_CODE_HOST_SESSION_ID': 'local_me'})
+        self.assertEqual(run.returncode, 0, run.stderr)
+
     def test_missing_config_key_is_named(self):
         with open(self.config, 'w') as f:
             json.dump({'owner_accounts': ['boss']}, f)

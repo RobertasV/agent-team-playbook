@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.29 – 2026-10-18
+- Run from a folder outside the project (a session's scratch folder), agentq finds the project's config through the session that ran it.
+
 ## 0.2.28 – 2026-10-18
 - Every `clear_every` (20) plans the plan ends with "then call clear_session with session_id \"self\"": the dispatcher empties its own conversation (the owner's word, written into its CLAUDE.md), so each wake no longer re-reads hundreds of thousands of tokens of history. Its Remote Control must be off for the app to allow it.
 

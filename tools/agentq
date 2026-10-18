@@ -190,15 +190,28 @@ def find_config(explicit):
         return explicit
     if os.environ.get('AGENTQ_CONFIG'):
         return os.environ['AGENTQ_CONFIG']
-    here = os.getcwd()
-    while True:
-        candidate = os.path.join(here, PROJECT_CONFIG)
-        if os.path.exists(candidate):
-            return candidate
-        parent = os.path.dirname(here)
-        if parent == here:
-            return DEFAULT_CONFIG
-        here = parent
+    starts = [os.getcwd()]
+    session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID')  # run from a scratch folder: the session's own project
+    if session:
+        apps = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or
+                                  '~/Library/Application Support/Claude/claude-code-sessions')
+        for meta in glob.glob(os.path.join(glob.escape(apps), '*', '*', f'{glob.escape(session)}.json')):
+            try:
+                with open(meta, encoding='utf-8') as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            starts += [d for d in (data.get('cwd'), data.get('originCwd')) if d]
+    for here in starts:
+        while True:
+            candidate = os.path.join(here, PROJECT_CONFIG)
+            if os.path.exists(candidate):
+                return candidate
+            parent = os.path.dirname(here)
+            if parent == here:
+                break
+            here = parent
+    return DEFAULT_CONFIG
 
 
 def number(text):

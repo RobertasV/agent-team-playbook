@@ -174,6 +174,11 @@ class AgentqTest(Base):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(self.calls(['issue', 'edit'])[0][:3], ['issue', 'edit', '5'])
 
+    def test_plain_agentq_shows_its_commands(self):
+        run = subprocess.run([sys.executable, TOOL], capture_output=True, text=True, env=self.env())
+        self.assertEqual(run.returncode, 0)
+        self.assertIn('assign', run.stdout)
+
     def test_config_may_follow_the_command(self):
         run = subprocess.run([sys.executable, TOOL, 'take', '5', '--config', self.config],
                              capture_output=True, text=True, env=self.env())

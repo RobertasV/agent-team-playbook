@@ -1892,7 +1892,7 @@ def cmd_role(cfg, opts):
 def main(argv=None):
     p = argparse.ArgumentParser(prog='agentq', description='Task queue of an agent team on GitHub issues.')
     p.add_argument('--config', help='config file (default: AGENTQ_CONFIG, the nearest .agentq.json, ~/.config/agentq/config.json)')
-    sub = p.add_subparsers(dest='cmd', required=True)
+    sub = p.add_subparsers(dest='cmd')
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument('--config', default=argparse.SUPPRESS, help='config file (also accepted before the command)')
     add_parser = sub.add_parser
@@ -2005,6 +2005,9 @@ def main(argv=None):
     ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
     ini.add_argument('--project', help='the project folder (default: here)')
     opts = p.parse_args(argv)
+    if not opts.cmd:  # plain `agentq`: what it can do
+        p.print_help()
+        return 0
     if opts.cmd == 'init':
         try:
             cmd_init(opts)

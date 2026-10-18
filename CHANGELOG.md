@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.33 – 2026-10-18
+- Plain `agentq` shows its commands instead of an error.
+
 ## 0.2.32 – 2026-10-18
 - `agentq open <role> "title" "text" [--as <role>]`: a new task for a role, with its label – checkers' findings, or a watcher role handing real failures to the programmer.
 

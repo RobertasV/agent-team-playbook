@@ -1038,6 +1038,10 @@ def build_plan(cfg, state, start):
                 role = role or default_role(cfg)
                 plan.append(('answered', ref, role, item['title'], None))
                 taken.add(role['role'])
+            elif is_open and labels['working'] not in names and (cfg['skip'] - {labels['health']}) & set(names):
+                role = role or default_role(cfg)  # set aside (deferred, waiting…), and the owner wrote on it:
+                plan.append(('parked', ref, role, item['title'], None))  # back to the role, which reads the words
+                taken.add(role['role'])
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 role = role or default_role(cfg)
                 holder = state.get('holders', {}).get(ref)
@@ -1088,6 +1092,9 @@ def render_plan(cfg, plan, start, clear=False, wake=False):
         if kind == 'forward':
             line = cfg['texts']['send_news'].format(ref=ref, since=since)
             lines.append(f'{n}. the owner wrote on {ref} ({role["role"]}): send this line to {session_of(role, sid)}: `{line}`')
+        elif kind == 'parked':
+            lines.append(f'{n}. the owner wrote on {ref}, which was set aside: run `{q} assign {ref} {role["role"]} '
+                         f'--unpark` and do what it prints.')
         elif kind == 'answered':
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
@@ -1307,7 +1314,7 @@ def cmd_watch(cfg, opts):
         try:
             plan = build_plan(cfg, work, start)
             if here == 'codex':  # the Codex life: it sorts tasks; Claude sessions are the Claude dispatcher's to reach
-                plan = [step for step in plan if step[0] in ('classify', 'answered')]
+                plan = [step for step in plan if step[0] in ('classify', 'answered', 'parked')]
         except Fail as e:
             state['watch'] = {'pid': os.getpid(), 'beat': iso(start), 'error': str(e)}
             save_state(cfg, state)
@@ -1667,6 +1674,8 @@ def cmd_assign(cfg, opts):
         print(f"{ref} → {role['role']}, in its queue")
         return
     remove += [n for n in {labels['question'], labels['owner_word']} if n in names]  # the owner answered
+    if opts.unpark:  # the owner wrote on a set-aside task: the role reads the words and decides (it may defer again)
+        remove += [n for n in names if n in cfg['skip'] - {labels['health']} and n not in remove]
     state = load_state(cfg)
     who = cfg['dispatcher']['name']
     if labels['working'] in names and role['label'] in names:
@@ -2690,6 +2699,7 @@ def main(argv=None):
     s.add_argument('issue')
     s.add_argument('role')
     s.add_argument('--queue', action='store_true', help='only the role label: no comment, no start (sorting at setup)')
+    s.add_argument('--unpark', action='store_true', help='the owner wrote on a set-aside task: drop deferred/waiting labels')
     b = sub.add_parser('brief', help="the issue's title, text, the owner's comments verbatim and screenshots as files")
     b.add_argument('issue')
     b.add_argument('--since', help="only the owner's comments from this time on")

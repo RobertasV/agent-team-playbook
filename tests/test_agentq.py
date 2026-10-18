@@ -708,6 +708,17 @@ class TeamTest(Base):
         self.data({REPO: {'open': [issue(4, 'Something new', ['prog', 'doing'])]}})
         self.assertIn('already being worked on', self.run_tool('assign', '4', 'programmer').stdout)
 
+    def test_the_owners_words_on_a_set_aside_task_bring_it_back(self):
+        self.data({REPO: {'open': []}})
+        self.run_tool('watch', '--once', now='2026-01-02T11:00:00Z')
+        self.data({REPO: {'open': [issue(20, 'Telegram idea', ['prog', 'later'],
+                                         comments=[said('boss', 'we do not defer this', '2026-01-02T11:59:00Z')])]}})
+        out = self.run_tool('watch', '--once').stdout
+        self.assertIn(f'the owner wrote on {REPO}#20, which was set aside: run `agentq assign {REPO}#20 programmer --unpark`', out)
+        self.run_tool('assign', '20', 'programmer', '--unpark')
+        edit = [c for c in self.calls(['issue', 'edit']) if c[2] == '20'][-1]
+        self.assertIn('later', edit[edit.index('--remove-label') + 1:])
+
     def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
         from importlib.machinery import SourceFileLoader
         import importlib.util

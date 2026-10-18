@@ -68,7 +68,7 @@ Two lives, the tickets between them: Claude has its dispatcher and sessions, Cod
 
 ## Releases and tokens
 
-- A release happens only after a check says GO and the owner says ship. Multi-agent reviews only when the owner asks.
+- A release happens only after a check says GO and the owner says ship. It is built from exactly the commit the check said GO on (a separate checkout or worktree at that commit), never from a newer `main`: commits that landed during the check wait for the next release. Multi-agent reviews only when the owner asks.
 - Before each step ask: is it needed, is there a cheaper way, is someone already doing it?
 
 ## Install (per project, with the owner)

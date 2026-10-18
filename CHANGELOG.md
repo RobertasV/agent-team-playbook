@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.57 – 2026-10-18
+- The owner's words on a set-aside task (deferred, waiting for another project, …) bring it back: the plan says `agentq assign N <role> --unpark`, which drops those labels, and the role reads the words and decides – before, such comments went nowhere.
+- The skill: a release is built from exactly the commit the check said GO on, never from a newer `main`.
+
 ## 0.2.56 – 2026-10-18
 - "3 programmers" in Codex: `agentq codex-workers 3 --role <role>` lists the missing Codex workers of one role (codex-<role>, codex-<role>-2, …) to create with `create_thread`; `agentq scale` stays for Claude sessions (a Codex dispatcher had used it and rested a Claude session).
 

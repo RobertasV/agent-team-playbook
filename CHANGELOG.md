@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.59 – 2026-10-18
+- The release role owns the release cycle: candidate tag `-rc1` on the approved commit, its own full check there, fixes through linked programmer tasks, a new `-rcN` checked again in full, GO only for the final candidate (from a Codex review of the release flow).
+
 ## 0.2.58 – 2026-10-18
 - A brief starts with the role's own description, so a long-running session follows its role's current rules on every task.
 - Releases go by a candidate tag: the approved commit is tagged (`candidate-1.2.3`), checked at that tag and built from it on GO; the release tag goes on the same commit.

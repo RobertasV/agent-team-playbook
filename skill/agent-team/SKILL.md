@@ -68,7 +68,7 @@ Two lives, the tickets between them: Claude has its dispatcher and sessions, Cod
 
 ## Releases and tokens
 
-- A release happens only after a check says GO and the owner says ship. When the owner approves a release, that commit gets a candidate tag (e.g. `candidate-1.2.3`; never a name that starts the release workflow, such as `v*`). The full check runs at that tag, and on GO the release is built from that tag (a separate worktree at it) and its release tag goes on the same commit – never a newer `main`: commits that landed meanwhile wait for the next release. Multi-agent reviews only when the owner asks.
+- A release happens only after a check says GO and the owner says ship. The release role owns a release from the owner's word to GO: it tags the approved commit as a candidate (`candidate-1.2.3-rc1`; never a name that starts the release workflow, such as `v*`) and runs the full check itself in a worktree at that tag. A problem → a linked fix task for the programmer (`agentq open`); the fix lands on `main`, the release role takes only that fix into a new candidate (`-rc2`, …) and checks it again in full – an older candidate's GO never carries over, and old tags are not moved. GO means this final candidate passed; the release is built from it and its release tag goes on the same commit. Newer `main` commits wait for the next release; the checker's batches on `main` are not a release GO. Multi-agent reviews only when the owner asks.
 - Before each step ask: is it needed, is there a cheaper way, is someone already doing it?
 
 ## Install (per project, with the owner)

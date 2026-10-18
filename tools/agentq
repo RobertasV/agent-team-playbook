@@ -103,8 +103,8 @@ DEFAULT_TEXTS = {
     'moved_copy': 'moved here from {ref}.',
     'split': 'the part for {repo} is {other}.',
     'split_from': 'Split from {ref}.',
-    'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new issue that links '
-                     'the original (`gh issue create`, body "From the check of #N: …"); never reopen the original.\n'
+    'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new task that links '
+                     'the original (`agentq open <role> "title" "From the check of #N: …"`); never reopen the original.\n'
                      'Finish with: `agentq checked {ref} "short summary"`'),
 }
 DEFAULT_ROLES = [
@@ -1338,6 +1338,16 @@ def cmd_move(cfg, opts):
         print(f'lesson recorded for the dispatcher: #{number} belonged to {target}')
 
 
+def cmd_open(cfg, opts):
+    """A new task for a role in this project (e.g. a finding for the programmer), with the role's label."""
+    role = role_by_name(cfg, opts.role)
+    repo = opts.repo or cfg['repos'][0]
+    if repo not in cfg['repos']:
+        raise Fail(f'{repo} is not in this config')
+    number = create_issue(repo, opts.title, f"🤖 {opts.who or cfg['role']}: {opts.text}", [role['label']])
+    print(f"{repo}#{number} opened for {role['role']}")
+
+
 def cmd_split(cfg, opts):
     """A part belongs to a linked project: a new issue there that links back; this one stays."""
     repo, number = resolve(cfg, opts.issue)
@@ -1934,6 +1944,12 @@ def main(argv=None):
     sp.add_argument('repo')
     sp.add_argument('title')
     sp.add_argument('text')
+    op = sub.add_parser('open', help='a new task for a role in this project, e.g. a finding')
+    op.add_argument('role')
+    op.add_argument('title')
+    op.add_argument('text')
+    op.add_argument('-R', '--repo')
+    op.add_argument('--as', dest='who', help='the role that opens it (shown as 🤖 <role>:)')
     ln = sub.add_parser('link', help='share tasks with another project (sharing is on while a link exists)')
     ln.add_argument('repo')
     ln.add_argument('about', nargs='?', help='what belongs there')
@@ -1999,7 +2015,7 @@ def main(argv=None):
     commands = {'queue': cmd_queue, 'take': cmd_take, 'ask': cmd_ask, 'defer': cmd_defer, 'wait': cmd_wait,
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
-                'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split,
+                'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
                 'link': cmd_link, 'scale': cmd_scale, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))

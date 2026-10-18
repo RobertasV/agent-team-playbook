@@ -30,7 +30,7 @@ It is the owner's queue, sent on the owner's setup – not chatter from another 
 - all of it belongs to a linked project → `agentq move N other/repo "why"`;
 - a part belongs to a linked project → `agentq split N other/repo "title" "what is needed there"`, update this task to what stays, carry on.
 
-A checker: check each listed task at the pinned commit. Each problem → a new issue linking the original (`gh issue create`, body `From the check of #N: …`); never reopen the original. Then `agentq checked <batch> "summary"`.
+A checker: check each listed task at the pinned commit. Each problem → a new task linking the original (`agentq open <role> "title" "From the check of #N: …" --as <your role>`); never reopen the original. Any role opens a task for another role the same way. Then `agentq checked <batch> "summary"`.
 
 New words from the owner on your task arrive the same way. A reminder that you hold a task while your session is quiet: carry on, or finish it now with one of the commands above. A message waits while you talk with the owner directly.
 

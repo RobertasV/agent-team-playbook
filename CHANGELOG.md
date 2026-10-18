@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.32 – 2026-10-18
+- `agentq open <role> "title" "text" [--as <role>]`: a new task for a role, with its label – checkers' findings, or a watcher role handing real failures to the programmer.
+
 ## 0.2.31 – 2026-10-18
 - Clearing the dispatcher is off by default (`clear_every` 0): in the live test, a watcher started before the clear woke nobody when it ended, and the team stood still. It stays available for when a safe order is found.
 

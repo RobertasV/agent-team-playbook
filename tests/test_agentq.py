@@ -650,6 +650,14 @@ class TeamTest(Base):
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 checker: checked #10 #11. all fine')
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '50', '-R', REPO])
 
+    def test_open_creates_a_task_for_a_role(self):
+        self.data({REPO: {'next': 77}})
+        self.assertIn(f'{REPO}#77 opened for programmer', self.run_tool('open', 'programmer', 'Export fails', 'evidence: …',
+                                                                       '--as', 'checker').stdout)
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertEqual(self.body(made), '🤖 checker: evidence: …')
+        self.assertEqual(made[made.index('--label') + 1], 'prog')
+
     def test_done_comments_drops_working_and_closes(self):
         self.data({REPO: {'open': [issue(7, 'Bug', ['design', 'doing'])]}})
         self.run_tool('done', '7', 'fixed the colour; checked on a phone')

@@ -723,6 +723,11 @@ class TeamTest(Base):
         self.assertIn('nothing yet', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)  # Codex's turn
         self.state(lambda s: s.__setitem__('last_team', {'programmer': 'codex'}))
         self.assertIn(f'{REPO}#7 is yours now (local_p)', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)
+        self.assertIn('no Claude session works', self.run_tool('scale', 'programmer', '0').stdout)  # Codex only
+        self.data({REPO: {'open': [issue(8, 'Menu', ['prog'])]}})
+        self.assertIn('local_p rests now', self.run_tool('next', 'programmer', '--as', 'local_p', ok=False).stdout)
+        self.assertNotIn('send this line', self.run_tool('watch', '--once', now=T1).stdout)
+        self.assertIn(f'Task {REPO}#8 for programmer is yours now (worker cx)', self.faked('codex'))
 
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.74 – 2026-10-19
+- `agentq scale <role> 0` for a role Codex workers also pull: no Claude session works on it (none gets a task, the dispatcher sends none), its Codex workers take every task.
+
 ## 0.2.73 – 2026-10-19
 - A Claude session that `agentq scale` rested takes no new task in `agentq next` (it is told to stop), and a Claude session leaves a role's next task to an idle Codex worker when Claude took the last one – with one Claude programmer left, the resting sessions kept taking tasks while three Codex programmers stood idle.
 

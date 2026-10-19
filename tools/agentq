@@ -449,8 +449,8 @@ def pulls(role):
 
 
 def pushes(role):
-    """The dispatcher sends tasks to its Claude sessions: claude, or both."""
-    return role.get('agent', 'claude') in ('claude', 'both')
+    """The dispatcher sends tasks to its Claude sessions: claude, or both – unless `scale <role> 0` rested them all."""
+    return role.get('agent', 'claude') in ('claude', 'both') and role.get('active') != 0
 
 
 def session_held(state, role, repo, issues):
@@ -2585,9 +2585,10 @@ def print_roles_table(cfg):
 
 def cmd_scale(cfg, opts):
     """N sessions of a role work in parallel. More than exist: what to start. Fewer: the rest rest and are kept."""
-    if opts.count < 1:
-        raise Fail('at least 1')
     name = role_by_name(cfg, opts.role)['role']
+    if opts.count < 0 or (opts.count == 0 and not pulls(role_by_name(cfg, name))):
+        raise Fail(f'at least 1 – {name} works only through its Claude sessions (0 needs Codex workers: '
+                   f'`agentq role {name} --agent both`)')
 
     def change(raw):
         roles = raw.setdefault('roles', [{**r, 'session': ''} for r in DEFAULT_ROLES])
@@ -2597,7 +2598,8 @@ def cmd_scale(cfg, opts):
     cfg = save_config(cfg, change)
     role = role_by_name(cfg, name)
     have = len(role['sessions'])
-    print(f"{name}: {opts.count} sessions work in parallel ({have} exist).")
+    print(f"{name}: {opts.count} sessions work in parallel ({have} exist)." if opts.count else
+          f"{name}: no Claude session works – its Codex workers take every task; its {have} session(s) rest, kept.")
     if opts.count > have:
         project = cfg.get('project_name') or cfg['repos'][0].split('/')[-1]
         group = cfg.get('team_group') or 'the team\'s sidebar group (none recorded)'
@@ -2606,7 +2608,7 @@ def cmd_scale(cfg, opts):
             print(f'{m - have}. start a session "{project} {name} {m}" in {cfg.get("checkout") or "the project folder"} '
                   f'(model {role["model"] or "as the role"}, effort {role["effort"] or "as the role"}), move it into '
                   f'{group}, then run `agentq role {name} --add-session <its id>`')
-    elif opts.count < have:
+    elif 0 < opts.count < have:
         print(f"Sessions {opts.count + 1}–{have} rest: no new tasks; a task they hold they finish. "
               f"They are kept and reused when the number grows again.")
     write_roles(cfg)

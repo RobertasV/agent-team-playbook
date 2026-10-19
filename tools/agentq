@@ -1603,7 +1603,11 @@ def cmd_next(cfg, opts):
             print('no role this worker may pull for – `agentq role <name> --agent codex|both` first.')
         return 1
     agent = 'claude' if worker in {x for r in roles for x in r['sessions']} or here == 'claude' else 'codex'
-    resting = [r for r in roles if worker in r['sessions'] and worker not in r['pool']]  # `agentq scale` rested it
+    ids = {worker, session} - {None}  # a Claude session is known by its id even when it runs under another name
+
+    def rests(role):  # a Claude worker outside the role's working sessions (`agentq scale`): no new tasks
+        return agent == 'claude' and (role.get('active') == 0 or (bool(role['sessions']) and not ids & set(role['pool'])))
+    resting = [r for r in roles if rests(r)]
     wait = opts.wait and here != 'codex'
     code = os.path.getmtime(os.path.realpath(__file__))
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
@@ -1628,8 +1632,8 @@ def cmd_next(cfg, opts):
                     del holders[ref]
                 if resting and len(resting) == len(roles):
                     save_state(cfg, state)
-                    print(f"{worker} rests now ({resting[0]['role']} works with {len(resting[0]['pool'])} Claude "
-                          f"session(s)): no new tasks. Stop this loop and end your turn.")
+                    print(f"{worker} rests now: it is not one of the {len(resting[0]['pool'])} Claude session(s) that "
+                          f"work as {resting[0]['role']} (agentq scale). No new tasks – stop this loop and end your turn.")
                     return 1
                 turns = state.get('last_team', {})
                 # Claude took this role's last task and a Codex worker waits for one: this one is Codex's turn

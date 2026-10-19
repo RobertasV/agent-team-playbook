@@ -729,6 +729,8 @@ class TeamTest(Base):
         self.assertIn('no Claude session works', self.run_tool('scale', 'programmer', '0').stdout)  # Codex only
         self.data({REPO: {'open': [issue(8, 'Menu', ['prog'])]}})
         self.assertIn('local_p rests now', self.run_tool('next', 'programmer', '--as', 'local_p', ok=False).stdout)
+        claude = {'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_z'}  # under a name, not its session id
+        self.assertIn('rests now', self.run_tool('next', 'programmer', '--as', 'Programmer 4', ok=False, env=claude).stdout)
         self.assertNotIn('send this line', self.run_tool('watch', '--once', now=T1).stdout)
         self.assertIn(f'Task {REPO}#8 for programmer is yours now (worker cx)', self.faked('codex'))
 

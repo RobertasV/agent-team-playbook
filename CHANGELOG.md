@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.76 – 2026-10-19
+- A Claude session that is not one of a role's working sessions takes no new task, also when it runs `agentq next` under a name instead of its session id, and none when the role is scaled to 0 – one such session kept taking tasks after the owner left no Claude programmer.
+
 ## 0.2.75 – 2026-10-19
 - `agentq assign` for a role whose free session waits in `agentq next` only queues the task: it set the working label and a claim first, so the task looked taken and nobody took it (a task sat locked for 36 minutes).
 

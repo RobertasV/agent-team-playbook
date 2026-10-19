@@ -650,6 +650,27 @@ def cmd_wait(cfg, opts):
     print(f'{repo}#{number}: waits for {ref}')
 
 
+def release_waits(cfg, state, repo, issues, start):
+    """A task waiting for another issue (`agentq wait`) goes back to the queue once that issue is closed – checked
+    every 10 minutes by the watcher, so nobody has to run `check --fix`."""
+    waiting = [i for i in issues if cfg['labels']['waiting'] in labels_of(i)]
+    seen = state.setdefault('waits_at', {})
+    if not waiting or (seen.get(repo) and start - parse_time(seen[repo]) < dt.timedelta(minutes=10)):
+        return
+    seen[repo] = iso(start)
+    for issue in waiting:
+        found = gh_json('issue', 'view', str(issue['number']), '-R', repo, '--json', 'comments')
+        marks = [m for c in found.get('comments', []) for m in WAIT_MARK.findall(c.get('body', ''))]
+        if not marks:
+            continue
+        other, other_n = marks[-1]
+        if gh_json('issue', 'view', other_n, '-R', other, '--json', 'state').get('state') != 'CLOSED':
+            continue
+        comment(cfg, repo, issue['number'], cfg['texts']['back'].format(ref=f'{other}#{other_n}'))
+        relabel(repo, issue['number'], remove=[cfg['labels']['waiting']])
+        issue['labels'] = [l for l in issue['labels'] if l['name'] != cfg['labels']['waiting']]
+
+
 def cmd_check(cfg, opts):
     moment = now()
     stale = dt.timedelta(hours=cfg['stale_hours'])
@@ -1036,6 +1057,7 @@ def build_plan(cfg, state, start):
     boards = {}
     for repo in cfg['repos']:
         issues = real_board(cfg, state, repo)
+        release_waits(cfg, state, repo, issues, start)
         boards[repo] = {'at': iso(start), 'issues': issues}
         taken = set()
         news, fresh = {}, []

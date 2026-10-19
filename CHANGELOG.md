@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.72 – 2026-10-19
+- The watcher puts a waiting task (`agentq wait`) back in the queue once the issue it waits for is closed, checked every 10 minutes – only `check --fix` did that, and a task waited 17 hours for an issue of the linked project closed long before.
+
 ## 0.2.71 – 2026-10-19
 - `agentq live <role> "<cmd>" --when checked`: the checker restarts the owner's running copy after every check on the commit it checked, even when some tests failed (not when it does not build or start) – the owner tests on it too.
 

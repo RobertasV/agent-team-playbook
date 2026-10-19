@@ -165,6 +165,18 @@ class AgentqTest(Base):
         self.assertIn(f'fixed  {REPO}#9: {OTHER}#4 closed', out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '9', '-R', REPO, '--remove-label', 'waits'])
 
+    def test_the_watcher_puts_a_waiting_task_back_when_the_other_closes(self):
+        text = f'🤖 programmer: waiting for {OTHER}#4.\n<!-- agentq:wait {OTHER}#4 -->'
+        waiting = issue(9, 'Needs the site', ['prog', 'waits'], comments=[said('bot', text, '2026-01-02T10:00:00Z')])
+        self.data({REPO: {'open': [waiting]}, OTHER: {'states': {'4': 'OPEN'}}})
+        self.assertNotIn(f'{REPO}#9', self.run_tool('watch', '--once').stdout)
+        self.data({REPO: {'open': [waiting]}, OTHER: {'states': {'4': 'CLOSED'}}})
+        self.assertNotIn(f'{REPO}#9', self.run_tool('watch', '--once', now='2026-01-02T12:05:00Z').stdout)  # 10 min apart
+        out = self.run_tool('watch', '--once', now='2026-01-02T12:11:00Z').stdout
+        self.assertIn(['issue', 'edit', '9', '-R', REPO, '--remove-label', 'waits'], self.calls(['issue', 'edit']))
+        self.assertIn(f'{OTHER}#4 is closed – back in the queue.', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn(f'run `agentq assign {REPO}#9', out)  # in the plan again
+
     def test_check_reports_stale_work_unanswered_owner_and_closed_working(self):
         self.data({REPO: {
             'open': [issue(1, 'Stale', ['doing'], updated='2026-01-01T00:00:00Z'),

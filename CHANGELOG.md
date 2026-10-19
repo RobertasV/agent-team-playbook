@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.78 – 2026-10-19
+- The skill names `agentq scale <role> 0` and says to run a command rather than answer from memory – a dispatcher told the owner 0 was impossible after it had become possible.
+
 ## 0.2.77 – 2026-10-19
 - The comment a worker takes a task with names it as the owner sees it: its Codex task's title or its Claude session's title (`🤖 programmer · codex (Codex programmer 2): taking this.`); a task the dispatcher sends to a session names that session.
 

@@ -2115,8 +2115,9 @@ def cmd_batch(cfg, opts):
         raise Fail(f'{repo} is not in this config')
     state = load_state(cfg)
     busy = busy_with(cfg, real_board(cfg, state, repo), role)
-    if busy:
-        raise Fail(f"{role['role']} is busy with {repo}#{busy[0]['number']}")
+    if busy:  # it made its batch itself (`agentq next`) since the plan: nothing left to do
+        print(f"nothing to do: {role['role']} is already on {repo}#{busy[0]['number']}")
+        return
     items = unchecked(cfg, state, repo, role, {})[:20]
     if not items:
         print(f'nothing for {role["role"]} to check')

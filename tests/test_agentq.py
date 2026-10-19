@@ -1064,6 +1064,10 @@ class TeamTest(Base):
         self.assertIn(['issue', 'edit', '11', '-R', REPO, '--add-label', 'checked: checker'], edits)
         self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), '🤖 checker: checked #10 #11. all fine')
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '50', '-R', REPO])
+        self.data({REPO: {'open': [issue(51, 'Check: #12', ['check', 'check batch', 'doing'])]}})
+        made = len(self.calls(['issue', 'create']))  # it made its own batch since the plan said one was ready
+        self.assertIn(f'nothing to do: checker is already on {REPO}#51', self.run_tool('batch', 'checker').stdout)
+        self.assertEqual(len(self.calls(['issue', 'create'])), made)
 
     def test_open_creates_a_task_for_a_role(self):
         self.data({REPO: {'next': 77}})

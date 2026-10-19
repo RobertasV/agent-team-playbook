@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.69 – 2026-10-19
+- `agentq batch` for a checker that already has its batch says "nothing to do" instead of failing – a pulling tester made its batch seconds after the plan said one was ready.
+
 ## 0.2.68 – 2026-10-19
 - A task is the owner's order: every brief says to do it to the end without asking whether to; a question about something wrong is a defect to fix; `agentq ask` only for a choice that is the owner's; sign-off skills (brainstorming) do not apply to team tasks – Codex workers stopped to ask "shall I fix it?".
 

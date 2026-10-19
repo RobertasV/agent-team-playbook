@@ -89,7 +89,7 @@ Only when the owner asks for it in words in this project – one line is enough,
 7. Ask: "Turn on the marketer?" Yes → `agentq role marketer`, then in Claude start its session and record `--session <id>` (in Codex it needs no session: a worker pulls its tasks). No → the programmer does marketing tasks.
 8. Ask: "Add more roles?" For each: name, what it does with 2–3 example tasks (optional screenshot), mode (programmer / checker with N and paths), merge or hand to the programmer (model and effort: the strongest at `xhigh` unless the owner says otherwise) → `agentq role <name> --description "…" --example "…" [--shot file] --mode … --model … --effort … --merge yes|no`; in Claude start its session and record `--session` (in Codex nothing more). If it overlaps a role, ask the owner where the border is → `agentq teach --owner "…"`. Repeat until no. Several sessions doing the same job are one role with a pool, never a second role per extra session.
 
-9. Ask: "Does a copy of the program run on this computer that should follow the checked version? Who restarts it, with what command?" Yes → `agentq live <role> "<command with {sha}>"` (usually the checker: it restarts only after GO, on the last green commit; nobody else restarts it). No – it runs on another machine, a server deploys itself, or nothing runs – skip; `agentq live --off` turns it off later.
+9. Ask: "Does a copy of the program run on this computer that should follow the checked version? Who restarts it, with what command?" Yes → `agentq live <role> "<command with {sha}>"` (usually the checker: it restarts only after GO, on the last green commit; nobody else restarts it). The owner tests on it too and wants every checked version → add `--when checked`: the checker restarts after every check on the commit it checked, red tests or not (not when it does not build or start). No – it runs on another machine, a server deploys itself, or nothing runs – skip; `agentq live --off` turns it off later.
 
 10. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
@@ -99,7 +99,7 @@ Re-running install creates nothing that exists (but an install run in Codex stil
 
 ## The owner's running copy
 
-When `agentq live` names a role, that role restarts the owner's running copy of the program after a check says GO, on the last green commit (the brief says which and with what command); every other role never restarts it. Without it nothing is restarted.
+When `agentq live` names a role, that role restarts the owner's running copy of the program after a check says GO, on the last green commit – or, with `--when checked`, after every check on the commit it checked, even with red tests (the brief says which and with what command); every other role never restarts it. Without it nothing is restarted.
 
 ## Test mode
 

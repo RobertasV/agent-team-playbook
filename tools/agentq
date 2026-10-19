@@ -130,7 +130,11 @@ DEFAULT_TEXTS = {
                   'Finish it with one command, then run `{next}`.'),
     'live': ("The owner's running copy: when your check says GO, restart it on {target} with `{command}` ({{sha}} = "
              "that commit). Only you restart it, and never on a red or unchecked commit."),
-    'live_other': "Never restart the owner's running copy of the program: {role} does that after a check says GO.",
+    'live_checked': ("The owner's running copy – the owner tests on it too: after every check you finish, restart it on "
+                     "the commit you checked with `{command}` ({{sha}} = that commit), even when some tests failed – "
+                     "those become tasks as usual. Not when the program does not build or start at that commit: then "
+                     "leave the running copy as it is and open a task with the priority label. Only you restart it."),
+    'live_other': "Never restart the owner's running copy of the program: {role} does that.",
     'codex_unreached': 'back in the queue: its Codex worker ({worker}) could not be reached ({error}).',
     'finish_batch': ('Check each task listed above at the commit given. Each problem becomes a new task that links '
                      'the original (`agentq open <role> "title" "From the check of #N: …"`); never reopen the original.\n'
@@ -1832,7 +1836,8 @@ def cmd_brief(cfg, opts):
             if role['role'].lower() == live['role'].lower():
                 green = load_state(cfg).get('tests', {}).get('green') if cfg['tests']['mode'] == 'batched' else None
                 target = f'the last green commit, {green}' if green else 'the commit you checked'
-                out.append(texts['live'].format(command=live['command'], target=target))
+                out.append(texts['live_checked' if live.get('when') == 'checked' else 'live']
+                           .format(command=live['command'], target=target))
             else:
                 out.append(texts['live_other'].format(role=live['role']))
         out.append(texts['after'].format(role=role['role']))
@@ -2677,8 +2682,9 @@ def cmd_stats(cfg, opts):
 
 
 def cmd_live(cfg, opts):
-    """The owner's running copy of the program: which role restarts it after a check says GO, and with what command
-    ({sha} = the commit). None: nothing is restarted – e.g. the program runs on another machine, or not at all."""
+    """The owner's running copy of the program: which role restarts it, when, and with what command ({sha} = the
+    commit). After GO on the last green commit, or with --when checked after every check on the commit it checked,
+    red tests or not (the owner tests on it too). None: nothing is restarted – e.g. it runs on another machine."""
     if opts.off or opts.role:
         def change(raw):
             if opts.off:
@@ -2687,9 +2693,12 @@ def cmd_live(cfg, opts):
                 raise Fail('give the restart command too, e.g. agentq live checker "~/bin/restart.sh {sha}"')
             else:
                 raw['live'] = {'role': role_by_name(cfg, opts.role)['role'], 'command': opts.command}
+                if opts.when == 'checked':
+                    raw['live']['when'] = 'checked'
         cfg = save_config(cfg, change)
     live = cfg.get('live') or {}
-    print(f"the owner's running copy: {live['role']} restarts it after GO with `{live['command']}`" if live.get('command')
+    when = 'after every check, red tests or not,' if live.get('when') == 'checked' else 'after GO'
+    print(f"the owner's running copy: {live['role']} restarts it {when} with `{live['command']}`" if live.get('command')
           else "the owner's running copy: none – nothing is restarted")
 
 
@@ -2885,9 +2894,11 @@ def main(argv=None):
     cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')
     cw.add_argument('count', type=int, nargs='?', default=1, help='workers per role (default 1)')
     cw.add_argument('--role', help='only this role, e.g. "3 Codex programmers": codex-workers 3 --role programmer')
-    lv = sub.add_parser('live', help="which role restarts the owner's running copy after GO, and how (--off: none)")
+    lv = sub.add_parser('live', help="which role restarts the owner's running copy, when and how (--off: none)")
     lv.add_argument('role', nargs='?')
     lv.add_argument('command', nargs='?', help='the restart command; {sha} is the commit')
+    lv.add_argument('--when', choices=('go', 'checked'), default='go',
+                    help='go: after GO, on the last green commit; checked: after every check, red tests or not')
     lv.add_argument('--off', action='store_true')
     tm = sub.add_parser('team', help='move the whole team (dispatcher and roles) to claude or to codex')
     tm.add_argument('agent', choices=('claude', 'codex', 'both'))

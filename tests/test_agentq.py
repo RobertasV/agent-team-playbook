@@ -759,6 +759,10 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}, 'api': api})
         self.assertIn('restart it on the commit you checked with `~/bin/restart.sh {sha}`', self.run_tool('brief', '9').stdout)
         self.assertIn("Never restart the owner's running copy of the program: checker does", self.run_tool('brief', '7').stdout)
+        self.assertIn('after every check, red tests or not', self.run_tool('live', 'checker', '~/bin/restart.sh {sha}',
+                                                                          '--when', 'checked').stdout)
+        self.assertIn('after every check you finish, restart it on the commit you checked with `~/bin/restart.sh {sha}`',
+                      self.run_tool('brief', '9').stdout)
         self.run_tool('live', '--off')
         self.assertNotIn('running copy', self.run_tool('brief', '7').stdout)
 

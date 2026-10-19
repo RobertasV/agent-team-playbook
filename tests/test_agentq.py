@@ -576,7 +576,7 @@ class TeamTest(Base):
         run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'next', 'programmer'], capture_output=True,
                              text=True, env=claude)
         self.assertIn(f'{REPO}#7 is yours now (local_p).', run.stdout)
-        self.assertIn('🤖 programmer · claude: taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn('🤖 programmer · claude (local_p): taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
         self.assertIn('--add-label', self.calls(['issue', 'edit'])[-1])
         self.assertIn('claude', self.calls(['issue', 'edit'])[-1])
         os.makedirs(self.config + '.state.json.waiting', exist_ok=True)  # local_p waits for its next task
@@ -613,11 +613,13 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', env={'CODEX_HOME': os.path.join(self.dir.name, 'none')})
         self.assertEqual(self.faked('codex'), '')  # its Codex task was archived or deleted: nothing sent
         self.rollout('t1', T0)
+        with open(os.path.join(self.dir.name, 'codexhome', 'session_index.jsonl'), 'w') as f:  # its title in the app
+            f.write(json.dumps({'id': 't1', 'thread_name': 'Codex designer 1'}) + '\n')
         self.assertNotIn('designer', self.run_tool('watch', '--once').stdout)  # no dispatcher wake: the watcher sent it
         self.assertIn(f'queue --thread t1 --message Task {REPO}#7 for designer is yours now (worker cx)', self.faked('codex'))
         self.assertIn('next designer --as cx', self.faked('codex'))
         self.assertIn('-g codex://threads/t1', self.faked('open'))  # the app had not loaded it: opened in the background
-        self.assertIn('🤖 designer · codex: taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn('🤖 designer · codex (Codex designer 1): taking this.', self.body(self.calls(['issue', 'comment'])[-1]))
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label', 'doing',
                                                              '--add-label', 'codex'])
         self.assertEqual(self.state()['holders'], {f'{REPO}#7': 'cx'})

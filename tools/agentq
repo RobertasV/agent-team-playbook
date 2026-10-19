@@ -519,9 +519,29 @@ def view(repo, number):
     return gh_json('issue', 'view', str(number), '-R', repo, '--json', 'number,title,body,labels,state,author')
 
 
-def comment(cfg, repo, number, text, who=None, agent=None):
+def worker_title(cfg, worker):
+    """The name the owner sees for a worker: its Codex task's or Claude session's title, else the worker's name."""
+    if not worker:
+        return None
+    info = load_state(cfg).get('codex', {}).get(worker)
+    if info:
+        try:
+            with open(os.path.join(CODEX_HOME, 'session_index.jsonl'), encoding='utf-8') as f:
+                names = [json.loads(line).get('thread_name') for line in f if info['thread'] in line]
+        except (OSError, ValueError):
+            names = []
+        return ([n for n in names if n] or [worker])[-1]
+    metas = glob.glob(os.path.join(glob.escape(cfg['app_sessions']), '*', '*', f'{glob.escape(worker)}.json'))
+    try:
+        with open(max(metas, key=os.path.getmtime), encoding='utf-8') as f:
+            return json.load(f).get('title') or worker
+    except (ValueError, OSError):
+        return worker
+
+
+def comment(cfg, repo, number, text, who=None, agent=None, name=None):
     agent = agent or running_in()
-    body = f"🤖 {who or cfg['role']}{' · ' + agent if agent else ''}: {text}"
+    body = f"🤖 {who or cfg['role']}{' · ' + agent if agent else ''}{f' ({name})' if name else ''}: {text}"
     gh('issue', 'comment', str(number), '-R', repo, '--body', body)
 
 
@@ -1430,11 +1450,11 @@ def print_send(cfg, state, role, ref, issue_labels, batch=False, sid=None):
         print(f'{n}. {step}')
 
 
-def claim(cfg, repo, number, text, who, agent=None):
+def claim(cfg, repo, number, text, who, agent=None, name=None):
     """GitHub has no lock: post a claim, read the comments back; the earliest claim of the last 10 minutes wins.
     A loser deletes its claim and returns False, so two dispatchers or workers on other computers never share a task."""
     mine = f'{socket.gethostname()}/{who}/{uuid.uuid4().hex[:8]}'
-    comment(cfg, repo, number, f'{text}\n<!-- agentq:claim {mine} -->', who, agent)
+    comment(cfg, repo, number, f'{text}\n<!-- agentq:claim {mine} -->', who, agent, name)
     comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
     recent = [c for c in comments if CLAIM_MARK.search(c.get('body') or '')
               and now() - parse_time(c['created_at']) <= dt.timedelta(minutes=10)]
@@ -1523,7 +1543,7 @@ def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
         if fresh.get('state', 'OPEN') != 'OPEN' or labels['working'] in labels_of(fresh) \
                 or role['label'] not in labels_of(fresh):
             continue
-        if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role'], agent):
+        if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role'], agent, worker_title(cfg, worker)):
             relabel(repo, issue['number'], add=[labels['working']] + add_agent,
                     remove=[n for n in drop_agent if n in labels_of(fresh)])
             ref = f"{repo}#{issue['number']}"
@@ -1780,7 +1800,7 @@ def cmd_assign(cfg, opts):
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, queued: a free session waiting in `agentq next` takes it itself. Nothing to send.")
         return
-    if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who):
+    if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who, name=worker_title(cfg, sid)):
         print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
         return
     relabel(repo, number, add=[role['label'], labels['working'], *agent_labels(cfg, 'claude')[0]],

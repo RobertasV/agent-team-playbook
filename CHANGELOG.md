@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.77 – 2026-10-19
+- The comment a worker takes a task with names it as the owner sees it: its Codex task's title or its Claude session's title (`🤖 programmer · codex (Codex programmer 2): taking this.`); a task the dispatcher sends to a session names that session.
+
 ## 0.2.76 – 2026-10-19
 - A Claude session that is not one of a role's working sessions takes no new task, also when it runs `agentq next` under a name instead of its session id, and none when the role is scaled to 0 – one such session kept taking tasks after the owner left no Claude programmer.
 

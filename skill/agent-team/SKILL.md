@@ -53,7 +53,8 @@ Two lives, the tickets between them: Claude has its dispatcher and sessions, Cod
 
 ## The owner's words
 
-- A question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.
+- An issue on the board is the owner's order: the worker who takes it does it to the end without asking whether to. A question pointing at something wrong ("why does this always spin?") reports a defect: find the cause, fix it. `agentq ask` only for a choice that is the owner's (what the product should do where the task leaves it open, money, publishing, deleting their data), never for a go-ahead; skills that wait for the user's sign-off before work (brainstorming, design approval) do not apply to team tasks.
+- In a conversation with the owner, a question or an idea is not a decision. Answer critically: where you disagree, why, cost, risk, a better option. Change nothing until they say so.
 - A clear word ("do it", "defer", "won't do") is a decision. Record it with their exact words (`agentq defer N "…"`).
 - When a change alters text agents read, tell the owner which rule changed (was → now).
 

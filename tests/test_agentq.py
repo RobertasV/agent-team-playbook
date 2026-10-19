@@ -958,6 +958,7 @@ class TeamTest(Base):
         self.assertIn('--- handed over, 2026-01-02T09:30:00Z ---\n🤖 marketer: → designer. texts in branch copy-1\n', out)
         self.assertNotIn('agentq:route', out)
         self.assertIn('--no-lesson', out)
+        self.assertIn("the owner's order: do it to the end without asking whether to", out)
         files = [l for l in out.splitlines() if l.endswith('.png')]
         self.assertEqual(len(files), 2)
         self.assertTrue(files[0].startswith(os.path.join(self.dir.name, 'home', '.cache', 'agentq', 'shots')))

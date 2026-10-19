@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.68 – 2026-10-19
+- A task is the owner's order: every brief says to do it to the end without asking whether to; a question about something wrong is a defect to fix; `agentq ask` only for a choice that is the owner's; sign-off skills (brainstorming) do not apply to team tasks – Codex workers stopped to ask "shall I fix it?".
+
 ## 0.2.67 – 2026-10-19
 - Codex workers start on a named model: config `codex_model` (a role's `--codex-model` wins), shown in each `agentq codex-workers` block – workers created with `create_thread` had taken the app's default model.
 

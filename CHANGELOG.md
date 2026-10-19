@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.75 – 2026-10-19
+- `agentq assign` for a role whose free session waits in `agentq next` only queues the task: it set the working label and a claim first, so the task looked taken and nobody took it (a task sat locked for 36 minutes).
+
 ## 0.2.74 – 2026-10-19
 - `agentq scale <role> 0` for a role Codex workers also pull: no Claude session works on it (none gets a task, the dispatcher sends none), its Codex workers take every task.
 

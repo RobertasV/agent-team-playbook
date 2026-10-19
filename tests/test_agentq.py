@@ -587,6 +587,9 @@ class TeamTest(Base):
         self.assertNotIn('assign', self.run_tool('watch', '--once').stdout)  # no dispatcher wake for it
         out = self.run_tool('assign', '8', 'programmer').stdout  # e.g. the owner answered: no message on top of its pull
         self.assertIn('queued: a free session waiting in `agentq next` takes it itself', out)
+        edits = [c for c in self.calls(['issue', 'edit']) if c[2] == '8']
+        self.assertNotIn('doing', [x for c in edits for x in c[c.index('--add-label'):] if '--add-label' in c])
+        self.assertFalse(any('agentq:claim' in self.body(c) for c in self.calls(['issue', 'comment']) if c[2] == '8'))
 
     def rollout(self, thread, at):
         """The Codex task's rollout file, last written at this time."""

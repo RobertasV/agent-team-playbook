@@ -1768,18 +1768,19 @@ def cmd_assign(cfg, opts):
         why = f"its sessions work on #{busy[0]['number']}" if busy else 'no Claude session'
         print(f"{ref} → {role['role']}, queued ({why}). Nothing to send.")
         return
+    waiting = waiting_workers(cfg, role)
+    sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy], waiting)
+    if sid in waiting:  # every free session waits in `agentq next`: one of them takes it itself – a message too would
+        # give it two tasks. Neither a working label nor a claim here: either would keep the worker from taking it
+        comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
+        relabel(repo, number, add=[role['label']], remove=remove)
+        print(f"{ref} → {role['role']}, queued: a free session waiting in `agentq next` takes it itself. Nothing to send.")
+        return
     if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who):
         print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
         return
     relabel(repo, number, add=[role['label'], labels['working'], *agent_labels(cfg, 'claude')[0]],
             remove=remove + [n for n in agent_labels(cfg, 'claude')[1] if n in names])
-    waiting = waiting_workers(cfg, role)
-    sid = free_session(state, role, [f"{repo}#{i['number']}" for i in busy], waiting)
-    if sid in waiting:  # every free session waits in `agentq next`: one of them takes it itself – a message too would
-        comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)  # give it two tasks
-        relabel(repo, number, add=[role['label']], remove=remove)
-        print(f"{ref} → {role['role']}, queued: a free session waiting in `agentq next` takes it itself. Nothing to send.")
-        return
     state.setdefault('holders', {})[ref] = sid
     state.setdefault('last_team', {})[role['role']] = 'claude'
     print(f"{ref} → {role['role']}, working. Now:")

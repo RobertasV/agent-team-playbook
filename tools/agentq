@@ -291,6 +291,7 @@ def load_config(path):
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
     cfg['disk_min_gb'] = cfg.get('disk_min_gb', 30)
+    cfg['codex_model'] = cfg.get('codex_model', '')  # the model Codex workers start on; a role's codex_model wins
     cfg['clear_every'] = cfg.get('clear_every', 0)
     cfg['priority_words'] = cfg.get('priority_words') or [cfg['labels']['priority']]  # off: after a clear a watcher started before it wakes nobody
     tests = {'mode': 'per-task', 'full': '', 'every': 5, 'checkout': '', 'branch': 'main', 'timeout_minutes': 60,
@@ -2565,7 +2566,8 @@ def cmd_workers(cfg, opts):
     have = {w for w, i in load_state(cfg).get('codex', {}).items() if i.get('host') == host and codex_activity(i['thread'])}
     names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if n > 1 else ''),
               f"Codex {r['role']}" + (f' {n}' if n > 1 else ''),
-              {'max': 'xhigh'}.get(r['effort'], r['effort']) or 'xhigh')  # Codex has no "max"
+              {'max': 'xhigh'}.get(r['effort'], r['effort']) or 'xhigh',  # Codex has no "max"
+              r.get('codex_model') or cfg['codex_model'])
              for r in roles for n in range(1, opts.count + 1)]
     missing = [x for x in names if x[1] not in have]
     if not missing:
@@ -2573,11 +2575,12 @@ def cmd_workers(cfg, opts):
         return
     project = cfg.get('checkout') or os.getcwd()
     print(f"Create one Codex task per block below in the project {project}, titled as the block says, with the "
-          f"block's text as its first message and the reasoning effort it names (thinking; xhigh = extra high). In the "
-          f"Codex app: the create_thread tool (list_projects gives the project's id); otherwise the owner: New task in "
-          f"that project, set the effort, paste, Send.")
-    for role, name, title, effort in missing:
-        print(f"\n--- {title} (reasoning effort: {effort}) ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
+          f"block's text as its first message, and the model and reasoning effort it names (thinking; xhigh = extra "
+          f"high) – never the app's default model when the block names one. In the Codex app: the create_thread tool "
+          f"(list_projects gives the project's id); otherwise the owner: New task in that project, pick the model and "
+          f"effort, paste, Send.")
+    for role, name, title, effort, model in missing:
+        print(f"\n--- {title} (model: {model or 'the app default'}, reasoning effort: {effort}) ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
                                                            agentq=shlex_quote(os.path.realpath(__file__))))
 
 
@@ -2651,8 +2654,8 @@ def cmd_role(cfg, opts):
         if entry is None:
             entry = {'role': name, **copy.deepcopy(PRESETS.get(name.lower(), {}))}
             roles.append(entry)
-        for key in ('label', 'mode', 'n', 'hours', 'model', 'release_model', 'effort', 'hard_effort', 'session',
-                    'description', 'agent'):
+        for key in ('label', 'mode', 'n', 'hours', 'model', 'codex_model', 'release_model', 'effort', 'hard_effort',
+                    'session', 'description', 'agent'):
             if getattr(opts, key) is not None:
                 entry[key] = getattr(opts, key)
         if opts.add_session:
@@ -2808,6 +2811,7 @@ def main(argv=None):
     ro.add_argument('--hours', type=number)
     ro.add_argument('--paths', help='comma-separated path prefixes or globs (checker mode)')
     ro.add_argument('--model')
+    ro.add_argument('--codex-model', help="the model this role's Codex workers start on (config codex_model otherwise)")
     ro.add_argument('--release-model')
     ro.add_argument('--effort', choices=EFFORTS)
     ro.add_argument('--hard-effort', choices=EFFORTS)

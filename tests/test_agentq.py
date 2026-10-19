@@ -521,7 +521,7 @@ class TeamTest(Base):
         self.run_tool('team', 'both')
         out = self.run_tool('codex-workers').stdout
         self.assertIn('the create_thread tool', out)
-        self.assertIn('--- Codex programmer (reasoning effort: high) ---', out)
+        self.assertIn('--- Codex programmer (model: the app default, reasoning effort: high) ---', out)
         self.assertIn('next programmer --as codex-programmer', out)
         self.assertIn('end your turn', out)
         for role, thread in (('programmer', 't1'), ('designer', 't2'), ('checker', 't3')):
@@ -531,8 +531,10 @@ class TeamTest(Base):
         os.remove(os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02',
                                'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
         out = self.run_tool('codex-workers').stdout
-        self.assertIn('--- Codex designer (reasoning effort: xhigh) ---', out)
+        self.assertIn('--- Codex designer (model: the app default, reasoning effort: xhigh) ---', out)
+        self.run_tool('role', 'programmer', '--codex-model', 'model-b')
         more = self.run_tool('codex-workers', '3', '--role', 'programmer').stdout  # "3 Codex programmers"
+        self.assertIn('--- Codex programmer 2 (model: model-b, reasoning effort: high) ---', more)
         self.assertIn('--- Codex programmer 2', more)
         self.assertIn('--as codex-programmer-3', more)
         self.assertNotIn('designer', more)

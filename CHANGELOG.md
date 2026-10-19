@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.67 – 2026-10-19
+- Codex workers start on a named model: config `codex_model` (a role's `--codex-model` wins), shown in each `agentq codex-workers` block – workers created with `create_thread` had taken the app's default model.
+
 ## 0.2.66 – 2026-10-18
 - `agentq open <role> … -R other/repo` opens a task in a linked project (without labels, naming the role; that project's dispatcher sorts it) – a programmer could not hand the website's marketer a task.
 

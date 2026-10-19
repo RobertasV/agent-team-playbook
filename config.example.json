@@ -63,6 +63,7 @@
   "check_minutes": 60,
   "accept_issues_from_others": false,
   "tests": {"mode": "per-task", "full": "", "every": 5, "checkout": "", "branch": "main"},
+  "codex_model": "",
   "live": {"role": "checker", "command": "~/bin/restart-my-app.sh {sha}"},
   "texts": {
     "take": "taking this.",

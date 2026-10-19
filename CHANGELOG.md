@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.70 – 2026-10-19
+- `agentq health` removes the project's worktrees whose work is already in main: clean, untouched for `worktree_idle_hours` (12; 0 turns it off), with no process in them; the branch stays. A Claude session's own worktree is left to the app – 193 old worktrees had piled up.
+
 ## 0.2.69 – 2026-10-19
 - `agentq batch` for a checker that already has its batch says "nothing to do" instead of failing – a pulling tester made its batch seconds after the plan said one was ready.
 

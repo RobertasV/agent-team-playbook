@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1096,6 +1097,41 @@ class TeamTest(Base):
             json.dump(cfg, f)
         self.data({REPO: {'open': [], 'next': 60}})
         self.assertIn('GB free on this computer', self.run_tool('health').stdout)
+
+    def test_health_removes_the_worktrees_whose_work_is_in_main(self):
+        base = os.path.realpath(self.dir.name)  # git prints /private/var/…, not /var/…
+        project = os.path.join(base, 'proj')
+
+        def git(*args, cwd=project):
+            return subprocess.run(['git', '-C', cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', *args],
+                                  check=True, capture_output=True, text=True).stdout
+        subprocess.run(['git', 'init', '-q', '-b', 'main', project], check=True)
+        git('commit', '-q', '--allow-empty', '-m', 'one')
+        trees = {name: os.path.join(base, name) for name in ('merged', 'dirty', 'ahead', 'fresh')}
+        trees['session'] = os.path.join(project, '.claude', 'worktrees', 'session')
+        for name, path in trees.items():
+            git('worktree', 'add', '-q', '-b', name, path)
+        with open(os.path.join(trees['dirty'], 'x.txt'), 'w') as f:
+            f.write('not committed')
+        git('commit', '-q', '--allow-empty', '-m', 'not in main', cwd=trees['ahead'])
+        old = time.time() - 13 * 3600
+        for name, path in trees.items():
+            gitdir = git('rev-parse', '--absolute-git-dir', cwd=path).strip()
+            for part in ('HEAD', 'index', 'logs/HEAD'):
+                if name != 'fresh' and os.path.exists(os.path.join(gitdir, part)):
+                    os.utime(os.path.join(gitdir, part), (old, old))
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['checkout'] = project
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        self.data({REPO: {'open': [], 'next': 60}})
+        out = self.run_tool('health').stdout
+        self.assertIn(f"removed the worktree {trees['merged']}: its work is in main", out)
+        self.assertFalse(os.path.exists(trees['merged']))
+        for name in ('dirty', 'ahead', 'fresh', 'session'):
+            self.assertTrue(os.path.exists(trees[name]), name)
+        self.assertIn('merged', git('branch'))  # the branch stays for a task that comes back
 
     def test_health_reports_to_one_issue_and_closes_it_when_well(self):
         stale = issue(7, 'Stuck', ['prog', 'doing'], updated='2026-01-01T00:00:00Z')

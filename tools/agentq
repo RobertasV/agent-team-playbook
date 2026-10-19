@@ -297,6 +297,7 @@ def load_config(path):
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
     cfg['disk_min_gb'] = cfg.get('disk_min_gb', 30)
+    cfg['worktree_idle_hours'] = cfg.get('worktree_idle_hours', 12)  # merged, clean, untouched this long → removed; 0: off
     cfg['codex_model'] = cfg.get('codex_model', '')  # the model Codex workers start on; a role's codex_model wins
     cfg['clear_every'] = cfg.get('clear_every', 0)
     cfg['priority_words'] = cfg.get('priority_words') or [cfg['labels']['priority']]  # off: after a clear a watcher started before it wakes nobody
@@ -2167,6 +2168,55 @@ def cmd_checked(cfg, opts):
 
 # ---------- health ----------
 
+def sweep_worktrees(cfg):
+    """Worktrees of the project whose work is in main: removed. Only one that is clean (`git status` empty), untouched
+    for worktree_idle_hours, with no process working in it and whose HEAD main already has; its branch stays, so a task
+    that comes back gets a new worktree from it. A Claude session's own worktree (.claude/worktrees) is the app's: left."""
+    checkout = os.path.expanduser(cfg.get('checkout') or '')
+    if not cfg['worktree_idle_hours'] or not os.path.isdir(checkout):
+        return []
+
+    def run(*args, cwd=checkout):
+        return subprocess.run(['git', '-C', cwd, *args], capture_output=True, text=True)
+    run('worktree', 'prune')
+    branch = cfg['tests']['branch']
+    mains = [ref for ref in (f'origin/{branch}', branch) if run('rev-parse', '-q', '--verify', ref).returncode == 0]
+    try:
+        out = subprocess.run(['lsof', '-a', '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []  # cannot tell who works where: remove nothing
+    cwds = {os.path.realpath(line[1:]) for line in out.splitlines() if line.startswith('n')}
+    trees, cur = [], {}
+    for line in run('worktree', 'list', '--porcelain').stdout.splitlines() + ['']:
+        if line:
+            key, _, value = line.partition(' ')
+            cur[key] = value or True
+        elif cur:
+            trees.append(cur)
+            cur = {}
+    removed, limit = [], time.time() - cfg['worktree_idle_hours'] * 3600
+    for tree in trees[1:]:  # the first is the project's own checkout
+        path = tree['worktree']
+        real = os.path.realpath(path)
+        if tree.get('locked') or tree.get('prunable') or '/.claude/worktrees/' in real + '/' or not os.path.isdir(path):
+            continue
+        if any(c == real or c.startswith(real + '/') for c in cwds):
+            continue
+        gitdir = run('rev-parse', '--absolute-git-dir', cwd=path).stdout.strip()
+        stamps = [os.path.getmtime(p) for p in (os.path.join(gitdir, n) for n in ('HEAD', 'index', 'logs/HEAD'))
+                  if os.path.exists(p)]
+        if not stamps or max(stamps) > limit:
+            continue
+        if not any(run('merge-base', '--is-ancestor', tree['HEAD'], ref).returncode == 0 for ref in mains):
+            continue
+        status = run('status', '--porcelain', cwd=path)
+        if status.returncode or status.stdout.strip():
+            continue
+        if run('worktree', 'remove', path).returncode == 0:
+            removed.append(path)
+    return removed
+
+
 def cmd_health(cfg, opts):
     state = load_state(cfg)
     moment = now()
@@ -2199,6 +2249,8 @@ def cmd_health(cfg, opts):
                                                              label=cfg['labels']['working'], hours=cfg['stale_hours']))
     report_health(cfg, state, problems)
     save_state(cfg, state)
+    for path in sweep_worktrees(cfg):
+        print(f'removed the worktree {path}: its work is in {cfg["tests"]["branch"]}')
 
 
 def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):

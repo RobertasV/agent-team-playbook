@@ -64,6 +64,7 @@
   "accept_issues_from_others": false,
   "tests": {"mode": "per-task", "full": "", "every": 5, "checkout": "", "branch": "main"},
   "codex_model": "",
+  "worktree_idle_hours": 12,
   "live": {"role": "checker", "command": "~/bin/restart-my-app.sh {sha}"},
   "texts": {
     "take": "taking this.",

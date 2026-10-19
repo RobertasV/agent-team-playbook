@@ -705,6 +705,25 @@ class TeamTest(Base):
         self.run_tool('watch', '--once', now=T1)
         self.assertIn(f'Task {REPO}#7 for programmer is yours now (worker cx)', self.faked('codex'))
 
+    def test_a_resting_claude_session_takes_nothing_and_claude_leaves_codex_its_turn(self):
+        self.data({REPO: {'open': [], 'labels': []}})
+        self.run_tool('team', 'both')
+        self.run_tool('role', 'programmer', '--sessions', 'local_p,local_q')
+        self.run_tool('scale', 'programmer', '1')  # the owner: one Claude programmer
+        self.data({REPO: {'open': []}})
+        self.as_codex('next', 'programmer', '--as', 'cx')  # an idle Codex programmer
+        self.rollout('t1', T0)
+        self.data({REPO: {'open': [issue(7, 'Icon', ['prog'])]},
+                   'api': {f'repos/{REPO}/issues/7': {'title': 'Icon', 'body': 'x', 'labels': [{'name': 'prog'}],
+                                                       'user': {'login': 'boss'}}}})
+        out = self.run_tool('next', 'programmer', '--as', 'local_q', ok=False).stdout
+        self.assertIn('local_q rests now', out)
+        self.assertEqual(self.calls(['issue', 'comment']), [])
+        self.state(lambda s: s.__setitem__('last_team', {'programmer': 'claude'}))
+        self.assertIn('nothing yet', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)  # Codex's turn
+        self.state(lambda s: s.__setitem__('last_team', {'programmer': 'codex'}))
+        self.assertIn(f'{REPO}#7 is yours now (local_p)', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)
+
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})
         self.run_tool('team', 'both')

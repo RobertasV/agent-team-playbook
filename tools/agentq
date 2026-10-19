@@ -1603,6 +1603,7 @@ def cmd_next(cfg, opts):
             print('no role this worker may pull for – `agentq role <name> --agent codex|both` first.')
         return 1
     agent = 'claude' if worker in {x for r in roles for x in r['sessions']} or here == 'claude' else 'codex'
+    resting = [r for r in roles if worker in r['sessions'] and worker not in r['pool']]  # `agentq scale` rested it
     wait = opts.wait and here != 'codex'
     code = os.path.getmtime(os.path.realpath(__file__))
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
@@ -1625,8 +1626,17 @@ def cmd_next(cfg, opts):
                         cmd_brief(cfg, argparse.Namespace(issue=ref, since=None))
                         return 0
                     del holders[ref]
-                for repo in cfg['repos']:
-                    ref, role = take_next(cfg, state, repo, shared_board(cfg, state, repo), roles, worker, agent)
+                if resting and len(resting) == len(roles):
+                    save_state(cfg, state)
+                    print(f"{worker} rests now ({resting[0]['role']} works with {len(resting[0]['pool'])} Claude "
+                          f"session(s)): no new tasks. Stop this loop and end your turn.")
+                    return 1
+                turns = state.get('last_team', {})
+                # Claude took this role's last task and a Codex worker waits for one: this one is Codex's turn
+                mine = [r for r in roles if r not in resting and not (
+                    agent == 'claude' and pulls(r) and turns.get(r['role']) == 'claude' and codex_waits(cfg, state, r))]
+                for repo in cfg['repos'] if mine else []:
+                    ref, role = take_next(cfg, state, repo, shared_board(cfg, state, repo), mine, worker, agent)
                     if ref:
                         save_state(cfg, state)
                         print(f'{ref} is yours now ({worker}).')
@@ -1649,6 +1659,15 @@ def cmd_next(cfg, opts):
     finally:
         if wait:
             unmark_waiting(cfg, worker)
+
+
+def codex_waits(cfg, state, role):
+    """An idle Codex worker of this computer could take this role's next task: the watcher wakes it within a minute."""
+    host = socket.gethostname()
+    held = set(state.get('holders', {}).values())
+    idle = [i for w, i in state.get('codex', {}).items() if i.get('host') == host and role['role'] in i.get('roles', [])
+            and w not in held and i.get('idle') and codex_activity(i['thread'])]
+    return bool(idle) and codex_app_running()
 
 
 def reserve_codex(data, worker, seen, value):

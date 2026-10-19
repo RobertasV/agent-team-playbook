@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.73 – 2026-10-19
+- A Claude session that `agentq scale` rested takes no new task in `agentq next` (it is told to stop), and a Claude session leaves a role's next task to an idle Codex worker when Claude took the last one – with one Claude programmer left, the resting sessions kept taking tasks while three Codex programmers stood idle.
+
 ## 0.2.72 – 2026-10-19
 - The watcher puts a waiting task (`agentq wait`) back in the queue once the issue it waits for is closed, checked every 10 minutes – only `check --fix` did that, and a task waited 17 hours for an issue of the linked project closed long before.
 

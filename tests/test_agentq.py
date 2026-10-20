@@ -815,6 +815,29 @@ class TeamTest(Base):
         self.assertEqual(self.state()['holders'][f'{REPO}#7'], 'local_q')
         self.assertIn('doing', self.calls(['issue', 'edit'])[-1])
 
+    def test_three_failed_tries_hand_the_task_to_the_other_team(self):
+        self.data({REPO: {'open': [], 'labels': []}})
+        self.run_tool('team', 'both')
+        self.run_tool('role', 'programmer', '--sessions', 'local_p,local_q')
+        self.run_tool('scale', 'programmer', '0')  # Codex programmers only
+        self.state(lambda s: s.setdefault('holders', {}).__setitem__(f'{REPO}#7', 'cx'))
+        api = {f'repos/{REPO}/issues/7': {'title': 'Flaky e2e', 'body': 'x', 'user': {'login': 'boss'},
+                                           'labels': [{'name': 'prog'}, {'name': 'doing'}, {'name': 'codex'}]}}
+        self.data({REPO: {'open': [issue(7, 'Flaky e2e', ['prog', 'doing', 'codex'])]}, 'api': api})
+        self.assertIn('Three tries and it still fails', self.run_tool('brief', '7').stdout)
+        out = self.as_codex('handover', '7', 'v1–v3 still red under load; logs in task-7/').stdout
+        self.assertIn(f'{REPO}#7 → the claude team (programmer)', out)
+        said_ = self.body(self.calls(['issue', 'comment'])[-1])
+        self.assertIn('not done in 3 tries – over to the claude team. v1–v3 still red under load', said_)
+        self.assertIn('<!-- agentq:route -->', said_)  # the Codex claim is over
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label',
+                                                             'only claude', '--remove-label', 'doing'])
+        self.assertNotIn(f'{REPO}#7', self.state().get('holders', {}))
+        self.data({REPO: {'open': [issue(7, 'Flaky e2e', ['prog', 'codex', 'only claude'])]}, 'api': api})
+        out = self.run_tool('watch', '--once', now=T1).stdout  # no Claude programmer works, so a resting one gets it
+        self.assertIn(f'{REPO}#7 is kept for Claude and no Claude session works as programmer now: run '
+                      f'`agentq assign {REPO}#7 programmer --session local_p`', out)
+
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})
         self.run_tool('team', 'both')

@@ -198,6 +198,7 @@ DEFAULT_TEXTS = {
     'assign': '→ {role}.',
     'queued': 'queued for {role}.',
     'route': '→ {role}. {text}',
+    'handover': 'not done in {tries} tries – over to the {team} team. {text}',
     'done': '{text}',
     'batch_title': 'Check: {refs}',
     'batch_body': 'Finished tasks for {role} to check:\n{list}\n\nCommit: {commit}',
@@ -254,7 +255,9 @@ DEFAULT_TEXTS = {
             '`agentq ask` only for a choice that is the owner\'s – what the product should do where the task leaves it '
             'open, money, publishing, deleting their data – never for a go-ahead, and never ask in your chat: nobody '
             'reads it. Skills that wait for the user\'s sign-off before working (brainstorming, design approval) do '
-            'not apply to team tasks: the task is the sign-off.'),
+            'not apply to team tasks: the task is the sign-off. Three tries and it still fails (your fix does not pass '
+            'its checks, or the same problem comes back)? Stop and hand it to the other team (Claude ↔ Codex) with '
+            'what you tried and where it stands: `agentq handover {ref} "…"`.'),
     'after': ('Never message other sessions and never offer to take part of a task someone else holds: the board '
               'carries everything. Before you finish, delete what you made for this task outside the project – scratch '
               'copies, test checkouts, worktrees, build output – keeping only what the owner needs to see; never delete '
@@ -1091,7 +1094,7 @@ def check_held(cfg, state, repo, issues, start, plan):
                     quiet_holder(cfg, state, repo, ref, role, holder, last, start,
                                  lambda: message_codex(codex['thread'], nudge_text(cfg, ref, iso(last))), release=False)
                 continue
-            if not pushes(role) or (holder and holder not in role['sessions']) or (
+            if (holder and holder not in role['sessions']) or (not holder and not pushes(role)) or (
                     not holder and taken_elsewhere(cfg, state, repo, issue['number'])):
                 continue  # another worker or another computer holds it: nothing to watch here; health reports it
             sid = holder_of(state, role, ref)
@@ -1292,7 +1295,7 @@ def build_plan(cfg, state, start):
             elif not is_open or labels['working'] in names or cfg['skip'] & set(names):
                 role = role or default_role(cfg)
                 holder = state.get('holders', {}).get(ref)
-                if not pushes(role) or (holder and holder not in role['sessions']):
+                if (holder and holder not in role['sessions']) or (not pushes(role) and not holder):
                     continue  # a pulling worker reads new words when it runs `agentq done`
                 claims = [m.group(1) for c in item.get('comments', []) for m in [CLAIM_MARK.search(c.get('body') or '')] if m]
                 if claims and claims[-1].split('/')[0] != socket.gethostname():
@@ -1306,6 +1309,15 @@ def build_plan(cfg, state, start):
         wake_codex(cfg, state, repo, issues, start)
         cache = {}
         for role in cfg['roles']:
+            if not pushes(role) and role.get('active') == 0 and role['sessions']:
+                # no Claude session works this role (`scale 0`), but a task kept for Claude (the owner's word, or a
+                # Codex worker's hand-over after three tries) must still reach one: a free resting session gets it
+                held = set(state.get('holders', {}).values())
+                free = [s for s in role['sessions'] if s not in held]
+                kept = [i for i in issues if kept_for(cfg, i) == 'claude']
+                issue = next_issue(cfg, kept, role, (), 'claude')
+                if issue and free:
+                    plan.append(('assign_session', f"{repo}#{issue['number']}", role, issue['title'], None, free[0]))
             if not pushes(role):
                 continue  # its workers take their own tasks with `agentq next`
             pulling = waiting_workers(cfg, role) & set(role['pool'])  # they take their next task themselves
@@ -1347,6 +1359,9 @@ def render_plan(cfg, plan, start, clear=False, wake=False):
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
             lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
+        elif kind == 'assign_session':
+            lines.append(f'{n}. {ref} is kept for Claude and no Claude session works as {role["role"]} now: run '
+                         f'`{q} assign {ref} {role["role"]} --session {sid}` and do what it prints.')
         elif kind == 'nudge':
             line = nudge_text(cfg, ref, since)
             lines.append(f'{n}. {role["role"]} holds {ref} but has been quiet since {since}: send this line to '
@@ -2130,7 +2145,7 @@ def cmd_brief(cfg, opts):
     if not since:
         batch = BATCH_MARK.search(issue.get('body') or '')
         finish = 'finish_batch' if batch else 'finish' if role['merge'] else 'finish_handoff'
-        out += ['---', texts['act'], texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
+        out += ['---', texts['act'].format(ref=ref), texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
         if cfg['links'] and not batch:
             out.append(texts['finish_links'].format(ref=ref))
         if not batch and role['mode'] == 'programmer':
@@ -2232,6 +2247,24 @@ def cmd_route(cfg, opts):
     del examples[:-int(cfg['lesson_examples'])]
     save_lessons(cfg, lessons)
     print(f"lesson recorded for the dispatcher: #{number} is {target['role']}'s, not {who}'s")
+
+
+def cmd_handover(cfg, opts):
+    """Three tries and the task still fails: the other team (Claude ↔ Codex) takes it, with what was tried."""
+    repo, number = resolve(cfg, opts.issue)
+    issue = view(repo, number)
+    names = labels_of(issue)
+    labels = cfg['labels']
+    here = running_in()
+    team = here or ('codex' if labels['by_codex'] in names else 'claude')
+    other = 'claude' if team == 'codex' else 'codex'
+    role = role_of_labels(cfg, names) or default_role(cfg)
+    text = cfg['texts']['handover'].format(tries=opts.tries, team=other, text=opts.text).strip()
+    comment(cfg, repo, number, f'{text}\n{ROUTE_MARK}', role['role'], team)  # the route mark ends this team's claim
+    relabel(repo, number, add=[labels[f'only_{other}']],
+            remove=[n for n in (labels['working'], labels[f'only_{team}']) if n in names])
+    update_state(cfg, lambda data: data.get('holders', {}).pop(f'{repo}#{number}', None))
+    print(f"{repo}#{number} → the {other} team ({role['role']}); only {other} workers take it now")
 
 
 def rule_role(cfg, rest):
@@ -3150,6 +3183,10 @@ def main(argv=None):
     b = sub.add_parser('brief', help="the issue's title, text, the owner's comments verbatim and screenshots as files")
     b.add_argument('issue')
     b.add_argument('--since', help="only the owner's comments from this time on")
+    ho = sub.add_parser('handover', help='three tries and it still fails: the other team (Claude ↔ Codex) takes it')
+    ho.add_argument('issue')
+    ho.add_argument('text', help='what you tried and where it stands')
+    ho.add_argument('--tries', type=int, default=3)
     r = sub.add_parser('route', help='not mine: give it to another role (records a lesson for the dispatcher)')
     r.add_argument('issue')
     r.add_argument('role')
@@ -3265,14 +3302,14 @@ def main(argv=None):
             print(f'agentq: {e}', file=sys.stderr)
             return 1
     commands = {'queue': cmd_queue, 'take': cmd_take, 'ask': cmd_ask, 'defer': cmd_defer, 'wait': cmd_wait,
-                'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route,
+                'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route, 'handover': cmd_handover,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
                 'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'live': cmd_live, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         code = commands[opts.cmd](cfg, opts) or 0
-        if code == 0 and opts.cmd in ('done', 'ask', 'route', 'wait', 'move', 'checked'):
+        if code == 0 and opts.cmd in ('done', 'ask', 'route', 'handover', 'wait', 'move', 'checked'):
             note_finished(cfg)
         return code
     except Fail as e:

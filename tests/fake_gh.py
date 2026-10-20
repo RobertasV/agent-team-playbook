@@ -25,6 +25,9 @@ if args[:2] == ['issue', 'list']:
         issues = [i for i in issues if label in [l['name'] for l in i.get('labels', [])]]
     print(json.dumps(issues))
 elif args[:2] == ['issue', 'view']:
+    if error := repo.get('view_errors', {}).get(args[2]):
+        print(error, file=sys.stderr)
+        sys.exit(1)
     found = {'state': repo.get('states', {}).get(args[2], 'OPEN')}
     for state in ('open', 'closed'):
         for i in repo.get(state, []):
@@ -32,7 +35,15 @@ elif args[:2] == ['issue', 'view']:
                 found = {**i, 'state': state.upper()}
     print(json.dumps(found))
 elif args[:2] == ['issue', 'create']:
+    if repo.get('create_fails'):
+        print('issue creation refused', file=sys.stderr)
+        sys.exit(1)
     print(f"https://github.com/{opt('-R')}/issues/{repo.get('next', 100)}")
+elif args[:2] == ['repo', 'view']:
+    if error := data.get(args[2], {}).get('repo_error'):
+        print(error, file=sys.stderr)
+        sys.exit(1)
+    print(json.dumps({'nameWithOwner': args[2]}))
 elif args[:2] == ['issue', 'transfer']:
     if repo.get('transfer_fails'):
         print('cannot transfer between accounts', file=sys.stderr)

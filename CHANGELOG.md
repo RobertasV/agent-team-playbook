@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2 – 2026-10-20
+- Moving an issue releases its old local holder after the transfer (or copy and close) succeeds. `next` also recovers a stale holder whose issue was moved or deleted: it takes the next task or stops normally when none waits. Other workers' claims stay intact; an unknown read, network failure or lost repository access keeps the claim.
+
 ## 0.3.1 – 2026-10-20
 - `agentq init --like <config>`: a second computer takes the first computer's team – owner, AI account, repos, labels, texts, roles, rules, links – in the team's language, without that computer's folders, sessions, test runs and running copy. Before it, `init --second` started from the example's English labels, and a team that works in another language had to be copied by hand.
 

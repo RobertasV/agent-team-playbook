@@ -82,8 +82,22 @@ def board(repo):
                    '--json', 'number,title,labels,author,createdAt,updatedAt')
 
 
+class IssueNotFound(Fail):
+    """The issue is absent, while its repository can still be read."""
+
+
 def view(repo, number):
-    return gh_json('issue', 'view', str(number), '-R', repo, '--json', 'number,title,body,labels,state,author')
+    try:
+        return gh_json('issue', 'view', str(number), '-R', repo, '--json', 'number,title,body,labels,state,author')
+    except Fail as error:
+        # GraphQL resolved the repository but not this issue. A bare 404 can also mean lost repository access.
+        missing = f'Could not resolve to an issue or pull request with the number of {number}. (repository.issue)' in str(error)
+        if not missing and 'HTTP 404' in str(error):
+            repository = gh_json('repo', 'view', repo, '--json', 'nameWithOwner')
+            missing = isinstance(repository, dict) and str(repository.get('nameWithOwner', '')).lower() == repo.lower()
+        if missing:
+            raise IssueNotFound(str(error)) from error
+        raise
 
 
 def comment(cfg, repo, number, text, who=None, agent=None, name=None):

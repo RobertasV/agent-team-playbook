@@ -1424,6 +1424,67 @@ class LinkTest(Base):
         self.assertNotIn('lesson', self.run_tool('roles').stdout)
         self.assertFalse(os.path.exists(os.path.join(self.dir.name, 'disp', 'lessons.json')))
 
+    def test_move_releases_only_the_transferred_task_holder(self):
+        self.run_tool('role', 'programmer', '--agent', 'codex')
+        self.run_tool('link', OTHER, 'the website')
+        self.data({REPO: {'open': [issue(4, 'A page', ['prog', 'doing'])]}, OTHER: {'next': 9}})
+        holders = {f'{REPO}#4': 'codex-1', f'{REPO}#5': 'codex-2'}
+        self.state(lambda s: s.update({'holders': holders}))
+        self.run_tool('move', '4', OTHER)
+        self.assertEqual(self.state()['holders'], {f'{REPO}#5': 'codex-2'})
+        reads = len(self.calls(['issue', 'view']))
+        self.data({REPO: {'open': [], 'view_errors': {'4': 'GraphQL: Could not resolve to an issue or pull request with the number of 4. (repository.issue)'}}})
+        self.assertNotIn('you hold', self.run_tool('next', 'programmer', '--as', 'codex-1').stdout)
+        self.assertEqual(len(self.calls(['issue', 'view'])), reads, 'next must not look up the transferred number again')
+
+    def test_move_copy_fallback_releases_holder_only_after_success(self):
+        self.run_tool('link', OTHER, 'the website')
+        holders = {f'{REPO}#4': 'codex-1', f'{REPO}#5': 'codex-2'}
+        self.state(lambda s: s.update({'holders': holders}))
+        fixture = {REPO: {'open': [issue(4, 'A page', ['prog', 'doing'])], 'transfer_fails': True},
+                   OTHER: {'next': 9, 'create_fails': True}}
+        self.data(fixture)
+        self.assertNotEqual(self.run_tool('move', '4', OTHER, ok=False).returncode, 0)
+        self.assertEqual(self.state()['holders'], holders, 'a failed transfer and copy must keep the task held')
+        fixture[OTHER]['create_fails'] = False
+        self.data(fixture)
+        self.run_tool('move', '4', OTHER)
+        self.assertEqual(self.state()['holders'], {f'{REPO}#5': 'codex-2'})
+
+    def test_next_recovers_a_missing_held_issue_and_takes_the_next_task(self):
+        self.run_tool('role', 'programmer', '--agent', 'codex')
+        for error in ('GraphQL: Could not resolve to an issue or pull request with the number of 4. (repository.issue)',
+                      'gh: Not Found (HTTP 404)'):
+            with self.subTest(error=error):
+                self.state(lambda s: s.update({'holders': {f'{REPO}#4': 'codex-1', f'{REPO}#5': 'codex-2'}}))
+                self.data({REPO: {'open': [issue(6, 'Next', ['prog'])], 'view_errors': {'4': error}},
+                           'api': {f'repos/{REPO}/issues/6': {'title': 'Next', 'body': '', 'user': {'login': 'boss'}}}})
+                out = self.run_tool('next', 'programmer', '--as', 'codex-1').stdout
+                self.assertIn(f'{REPO}#6 is yours now', out)
+                self.assertEqual(self.state()['holders'], {f'{REPO}#5': 'codex-2', f'{REPO}#6': 'codex-1'})
+
+    def test_next_missing_held_issue_with_no_next_task_stops_normally(self):
+        self.run_tool('role', 'programmer', '--agent', 'codex')
+        self.state(lambda s: s.update({'holders': {f'{REPO}#4': 'codex-1', f'{REPO}#5': 'codex-2'}}))
+        self.data({REPO: {'open': [], 'view_errors': {'4': 'gh: Not Found (HTTP 404)'}}})
+        self.assertIn('No task now', self.as_codex('next', 'programmer', '--as', 'codex-1').stdout)
+        self.assertEqual(self.state()['holders'], {f'{REPO}#5': 'codex-2'})
+
+    def test_next_keeps_claims_when_the_issue_or_repository_read_is_unknown(self):
+        self.run_tool('role', 'programmer', '--agent', 'codex')
+        for error, repo_error in [('HTTP 403: Resource not accessible', None),
+                                  ('Connection refused', None),
+                                  ('GraphQL: Could not resolve to a Repository with the name acme/app.', None),
+                                  ('gh: Not Found (HTTP 404)', 'gh: Not Found (HTTP 404)')]:
+            with self.subTest(error=error, repo_error=repo_error):
+                holders = {f'{REPO}#4': 'codex-1', f'{REPO}#5': 'codex-2'}
+                self.state(lambda s: s.update({'holders': holders}))
+                self.data({REPO: {'open': [issue(6, 'Next', ['prog'])], 'view_errors': {'4': error}, 'repo_error': repo_error}})
+                run = self.run_tool('next', 'programmer', '--as', 'codex-1', ok=False)
+                self.assertNotEqual(run.returncode, 0)
+                self.assertEqual(self.state()['holders'], holders)
+                self.assertEqual(self.calls(['issue', 'comment']), [])
+
     def test_split_creates_the_other_part_with_a_link_back(self):
         self.run_tool('link', OTHER, 'the website')
         self.data({REPO: {'open': [issue(4, 'Launch', ['prog', 'doing'])]}, OTHER: {'next': 12}})

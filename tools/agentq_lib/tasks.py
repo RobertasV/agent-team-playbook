@@ -11,7 +11,7 @@ from shlex import quote as shlex_quote
 
 from .system import code_stamp, parent_gone, restart_if_updated, running_in, self_command, session_parent
 from .base import BATCH_MARK, Fail, iso, now, one_line, parse_time, ROUTE_MARK, WAIT_MARK
-from .github import claim, comment, gh, gh_json, labels_of, login_of, open_issues, relabel, resolve, view
+from .github import IssueNotFound, claim, comment, gh, gh_json, labels_of, login_of, open_issues, relabel, resolve, view
 from .config import (
     agent_labels, capacity, checked_label, default_role, holder, pulls, pushes, role_by_name, role_of_labels
 )
@@ -262,7 +262,10 @@ def cmd_next(cfg, opts):
                 holders = state.setdefault('holders', {})
                 for ref in [r for r, w in holders.items() if w == worker]:  # checked on GitHub, not in a snapshot
                     repo, number = ref.split('#')
-                    fresh = view(repo, int(number)) if repo in cfg['repos'] else {}
+                    try:
+                        fresh = view(repo, int(number)) if repo in cfg['repos'] else {}
+                    except IssueNotFound:
+                        fresh = {}  # a moved/deleted issue cannot keep this worker holding its old number
                     if fresh.get('state', 'OPEN') == 'OPEN' and cfg['labels']['working'] in labels_of(fresh):
                         save_state(cfg, state)
                         print(f'you hold {ref} – finish it first (agentq done / ask / route / wait); its task again:')

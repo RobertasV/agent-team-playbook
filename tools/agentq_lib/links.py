@@ -6,6 +6,7 @@ from .base import Fail, one_line
 from .github import comment, create_issue, gh, labels_of, relabel, resolve, view
 from .config import holder, role_by_name, role_of_labels, save_config
 from .lessons import load_lessons, save_lessons, write_roles
+from .state import update_state
 
 
 def linked(cfg, repo):
@@ -34,6 +35,7 @@ def cmd_move(cfg, opts):
         new = create_issue(target, issue['title'], body, [])
         gh('issue', 'close', str(number), '-R', repo, '--reason', 'not planned', '--comment', f'🤖 {who}: → {target}#{new}')
         url = f'{target}#{new}'
+    update_state(cfg, lambda data: data.get('holders', {}).pop(ref, None))
     print(f'{ref} → {url}')
     if owner and not opts.no_lesson:
         lessons = load_lessons(cfg)

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.79 – 2026-10-20
+- A task the owner keeps for one team: `agentq assign N <role> --only claude|codex` adds the `only claude` / `only codex` label, and the other team's workers never take it nor get woken for it – Codex programmers took a Claude-only task five times, each handing it back. `--session <id>` gives a task to a named Claude session of the role, even one that rests (`scale`).
+
 ## 0.2.78 – 2026-10-19
 - The skill names `agentq scale <role> 0` and says to run a command rather than answer from memory – a dispatcher told the owner 0 was impossible after it had become possible.
 

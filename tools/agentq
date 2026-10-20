@@ -51,6 +51,8 @@ DEFAULT_LABELS = {
     'checked': 'checked: {role}',
     'by_claude': 'claude',
     'by_codex': 'codex',
+    'only_claude': 'only claude',  # the owner's word: only this team may take the task
+    'only_codex': 'only codex',
 }
 DEFAULT_TEXTS = {
     'take': 'taking this.',
@@ -743,11 +745,17 @@ def busy_with(cfg, issues, role, but=None):
     return [i for i in issues if i['number'] != but and role['label'] in labels_of(i) and working in labels_of(i)]
 
 
-def next_issue(cfg, issues, role, skip_numbers=()):
-    """Priority label → blocking label → oldest."""
+def kept_for(cfg, issue):
+    """The team the owner kept this task for ('claude' or 'codex', by its only-label), else None."""
+    names = labels_of(issue)
+    return next((a for a in ('claude', 'codex') if cfg['labels'][f'only_{a}'] in names), None)
+
+
+def next_issue(cfg, issues, role, skip_numbers=(), agent=None):
+    """Priority label → blocking label → oldest; for a team (agent), none the owner kept for the other team."""
     skip = cfg['skip'] | {cfg['labels']['working'], cfg['labels']['batch']}
     queue = [i for i in issues if role['label'] in labels_of(i) and not skip & set(labels_of(i)) and trusted(cfg, i)
-             and i['number'] not in skip_numbers]
+             and i['number'] not in skip_numbers and (not agent or kept_for(cfg, i) in (None, agent))]
     queue.sort(key=lambda i: (cfg['labels']['priority'] not in labels_of(i),
                               cfg['labels']['blocking'] not in labels_of(i), i['number']))
     return queue[0] if queue else None
@@ -1141,7 +1149,7 @@ def build_plan(cfg, state, start):
                 - len(pulling) - (role['role'] in taken)
             picked = []
             while slots > 0:
-                issue = next_issue(cfg, issues, role, picked)
+                issue = next_issue(cfg, issues, role, picked, 'claude')
                 if not issue:
                     break
                 picked.append(issue['number'])
@@ -1531,7 +1539,7 @@ def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
             continue
         picked = list(skip)
         while True:  # this role's queue, in its order
-            issue = next_issue(cfg, issues, role, picked)
+            issue = next_issue(cfg, issues, role, picked, agent)
             if not issue:
                 break
             picked.append(issue['number'])
@@ -1541,7 +1549,7 @@ def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
     for role, issue in candidates:
         fresh = view(repo, issue['number'])
         if fresh.get('state', 'OPEN') != 'OPEN' or labels['working'] in labels_of(fresh) \
-                or role['label'] not in labels_of(fresh):
+                or role['label'] not in labels_of(fresh) or kept_for(cfg, fresh) not in (None, agent):
             continue
         if claim(cfg, repo, issue['number'], cfg['texts']['take'], role['role'], agent, worker_title(cfg, worker)):
             relabel(repo, issue['number'], add=[labels['working']] + add_agent,
@@ -1722,7 +1730,7 @@ def wake_codex(cfg, state, repo, issues, start):
         turns = state.get('last_team', {})
         roles = [r for r in cfg['roles'] if r['role'] in info.get('roles', []) and pulls(r)
                  and not (turns.get(r['role']) == 'codex' and waiting_workers(cfg, r))]
-        if not any(next_issue(cfg, issues, r, taken) or r['mode'] == 'checker' for r in roles):
+        if not any(next_issue(cfg, issues, r, taken, 'codex') or r['mode'] == 'checker' for r in roles):
             continue
         if not codex_activity(info['thread']):
             continue  # the owner archived or deleted this Codex task: it gets nothing
@@ -1777,8 +1785,31 @@ def cmd_assign(cfg, opts):
         remove += [n for n in names if n in cfg['skip'] - {labels['health']} and n not in remove]
     state = load_state(cfg)
     who = cfg['dispatcher']['name']
-    if labels['working'] in names and role['label'] in names:
+    only = [labels[f'only_{opts.only}']] if opts.only else []
+    if opts.only:  # the owner's word: only that team takes it, from now on
+        relabel(repo, number, add=only, remove=[labels[f'only_{a}'] for a in ('claude', 'codex')
+                                                if a != opts.only and labels[f'only_{a}'] in names])
+        names = [n for n in names if n not in (labels['only_claude'], labels['only_codex'])] + only
+    if labels['working'] in names and role['label'] in names and not opts.session:
         print(f"{ref} is already being worked on as {role['role']} – nothing to do.")  # the other dispatcher was first
+        return
+    if opts.session:  # the owner named a Claude session: it gets the task even if it rests (`scale`)
+        sid = opts.session
+        if sid not in role['sessions']:
+            raise Fail(f"{sid} is not one of {role['role']}'s sessions ({', '.join(role['sessions']) or 'none'})")
+        if labels['working'] in names:
+            raise Fail(f"{ref} is being worked on – wait until it is back in the queue, or ask the owner")
+        if not claim(cfg, repo, number, cfg['texts']['assign'].format(role=role['role']), who,
+                     name=worker_title(cfg, sid)):
+            print(f'{ref}: another dispatcher took it a moment earlier. Nothing to send.')
+            return
+        relabel(repo, number, add=[role['label'], labels['working'], *agent_labels(cfg, 'claude')[0]],
+                remove=remove + [n for n in agent_labels(cfg, 'claude')[1] if n in names])
+        state.setdefault('holders', {})[ref] = sid
+        state.setdefault('last_team', {})[role['role']] = 'claude'
+        print(f"{ref} → {role['role']}, working, for session {sid}. Now:")
+        print_send(cfg, state, role, ref, names, batch=labels['batch'] in names, sid=sid)
+        save_state(cfg, state)
         return
     if not pushes(role) or running_in() == 'codex':  # a Codex dispatcher cannot reach Claude sessions: workers pull
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
@@ -2418,7 +2449,8 @@ def cmd_nudge(cfg, opts):
 
 def all_labels(cfg):
     names = {cfg['labels'][k]: k for k in ('working', 'question', 'deferred', 'waiting', 'priority', 'blocking',
-                                            'hard', 'owner_word', 'batch', 'health', 'by_claude', 'by_codex')}
+                                            'hard', 'owner_word', 'batch', 'health', 'by_claude', 'by_codex',
+                                            'only_claude', 'only_codex')}
     for role in cfg['roles']:
         names.setdefault(role['label'], f'role: {role["role"]}')
         if role['mode'] == 'checker':
@@ -2881,6 +2913,8 @@ def main(argv=None):
     s.add_argument('role')
     s.add_argument('--queue', action='store_true', help='only the role label: no comment, no start (sorting at setup)')
     s.add_argument('--unpark', action='store_true', help='the owner wrote on a set-aside task: drop deferred/waiting labels')
+    s.add_argument('--only', choices=('claude', 'codex'), help="the owner's word: only this team may take the task")
+    s.add_argument('--session', help="the owner's word: this Claude session of the role takes it, even a resting one")
     b = sub.add_parser('brief', help="the issue's title, text, the owner's comments verbatim and screenshots as files")
     b.add_argument('issue')
     b.add_argument('--since', help="only the owner's comments from this time on")

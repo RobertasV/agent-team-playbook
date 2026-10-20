@@ -736,6 +736,26 @@ class TeamTest(Base):
         self.assertNotIn('send this line', self.run_tool('watch', '--once', now=T1).stdout)
         self.assertIn(f'Task {REPO}#8 for programmer is yours now (worker cx)', self.faked('codex'))
 
+    def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
+        self.data({REPO: {'open': [], 'labels': []}})
+        self.run_tool('team', 'both')
+        self.run_tool('role', 'programmer', '--sessions', 'local_p,local_q')
+        self.run_tool('scale', 'programmer', '0')  # Codex programmers only
+        self.as_codex('next', 'programmer', '--as', 'cx')
+        self.rollout('t1', T0)
+        kept = issue(7, 'Agree button', ['prog', 'only claude'])
+        api = {f'repos/{REPO}/issues/7': {'title': 'Agree button', 'body': 'x', 'user': {'login': 'boss'},
+                                           'labels': [{'name': 'prog'}, {'name': 'only claude'}]}}
+        self.data({REPO: {'open': [kept]}, 'api': api})
+        self.assertIn('No task now', self.as_codex('next', 'programmer', '--as', 'cx').stdout)
+        self.run_tool('watch', '--once', now=T1)
+        self.assertEqual(self.faked('codex'), '')  # nobody woken for it
+        out = self.run_tool('assign', '7', 'programmer', '--only', 'claude', '--session', 'local_q').stdout
+        self.assertIn(f'{REPO}#7 → programmer, working, for session local_q', out)
+        self.assertIn('send this line to session local_q', out)
+        self.assertEqual(self.state()['holders'][f'{REPO}#7'], 'local_q')
+        self.assertIn('doing', self.calls(['issue', 'edit'])[-1])
+
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})
         self.run_tool('team', 'both')

@@ -61,6 +61,9 @@ Do this once per project. The team is never installed globally.
    - The session sorts your open issues, starts the checker and dispatcher sessions (you approve each once) and adds a daily health timer.
    - It asks **"Turn on the marketer?"**, then **"Add more roles?"**, and repeats until you say no.
 4. **Another project?** Repeat step 3 there. When two projects both have the team, the session asks whether they should share tasks (`agentq link`).
+5. **The same project from a second computer?** Install there too; the session asks whether the team already runs on another computer and then sets that one up with `agentq init --second`. The first computer keeps the shared jobs (sorting new issues, full test runs, batches, handing back answered tasks); the second one serves only its own sessions and Codex workers. Claims on GitHub keep the two from taking the same task.
+
+**Windows** works too: Python 3.10+, `gh` and Git for Windows (Claude Code needs its bash anyway). Run agentq as `python <package>\tools\agentq …`; it prints every command it gives the agents in a form Git Bash, PowerShell and cmd all run (keep the package and Python in paths without spaces for PowerShell). Without the right to make symlinks, `init` uses a folder junction for the skill and a small pointer file for `.agentq.json`. The hourly health check is a Task Scheduler task instead of launchd. If the Codex CLI is not on PATH, set `AGENTQ_CODEX` to it. The tests run on Linux and Windows in CI.
 
 Nothing is installed outside the project and the two folders above. To uninstall, delete the two links in the project, its config and its dispatcher folder, and archive the sessions.
 

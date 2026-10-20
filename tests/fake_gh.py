@@ -4,6 +4,7 @@ import json
 import os
 import sys
 
+sys.stdout.reconfigure(encoding='utf-8')  # agentq reads gh's output as UTF-8, as the real gh writes it
 args = sys.argv[1:]
 with open(os.environ['FAKE_GH_LOG'], 'a', encoding='utf-8') as log:
     log.write(json.dumps(args) + '\n')

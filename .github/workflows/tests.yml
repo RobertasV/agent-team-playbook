@@ -1,0 +1,23 @@
+name: tests
+
+on:  # macOS runs the tests before every commit; CI adds Linux and Windows (a macOS runner costs 10× in a private repo)
+  push:
+    paths: ['tools/**', 'tests/**', '.github/workflows/tests.yml']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unittest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: agentq against a fake gh
+        # -X utf8: the test runner's own files; agentq itself runs without UTF-8 mode (the tests set PYTHONUTF8=0)
+        run: python -X utf8 -I -m unittest discover -s tests -v

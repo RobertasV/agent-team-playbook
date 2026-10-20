@@ -8,13 +8,13 @@ in as the AI account. See README.md, docs/DESIGN.md and config.example.json.
 import argparse
 import copy
 import datetime as dt
-import fcntl
 import fnmatch
 import glob
 import html
 import json
 import os
 import re
+import shutil
 from shutil import which as shutil_which
 import socket
 import uuid
@@ -25,7 +25,142 @@ import time
 import urllib.parse
 import urllib.request
 
+WINDOWS = os.name == 'nt'
+if WINDOWS:
+    import msvcrt
+else:
+    import fcntl
+for _stream in (sys.stdout, sys.stderr):  # a Windows pipe is not UTF-8 by default: "🤖" and "ė" must not crash a print
+    if _stream and hasattr(_stream, 'reconfigure') and (_stream.encoding or '').lower().replace('-', '') != 'utf8':
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+
 PACKAGE = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+SELF = os.path.realpath(__file__)
+
+
+def self_command():
+    """How a worker's shell runs this agentq. Windows has no shebang: python and the script, in forward slashes, which
+    Git Bash (Claude), PowerShell (Codex) and cmd all read; double quotes only when a path has a space."""
+    if not WINDOWS:
+        return shlex_quote(SELF)
+    parts = [p.replace('\\', '/') for p in (sys.executable, SELF)]
+    return ' '.join(f'"{p}"' if ' ' in p else p for p in parts)
+
+
+def tool(name):
+    """The command for gh, codex or open: AGENTQ_<NAME> when set (a .py file runs with this Python), else PATH."""
+    given = os.environ.get(f'AGENTQ_{name.upper()}')
+    if given is not None:
+        return ([sys.executable, given] if given.endswith('.py') else [given]) if given else None
+    found = shutil_which(name)
+    return [found] if found else None
+
+
+def lock_file(handle, wait=True):
+    """Lock an open file against other processes until unlock_file or close. False: another process holds it."""
+    if WINDOWS:
+        while True:
+            try:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return True
+            except OSError:
+                if not wait:
+                    return False
+                time.sleep(0.05)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        return True
+    except OSError:
+        return False
+
+
+def unlock_file(handle):
+    if WINDOWS:
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+    handle.close()
+
+
+def replace_file(tmp, path):
+    """os.replace; on Windows a reader holding the file open makes it fail for a moment, so try again."""
+    for attempt in range(50):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if not WINDOWS or attempt == 49:
+                raise
+            time.sleep(0.1)
+
+
+def detached():
+    """Popen arguments for a child that outlives this command and its session, in its own process group."""
+    if WINDOWS:
+        return {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+    return {'start_new_session': True}
+
+
+def kill_tree(pid):
+    """Stop a process started with detached() and everything it started."""
+    if WINDOWS:
+        subprocess.run(['taskkill', '/T', '/F', '/PID', str(pid)], capture_output=True)
+    else:
+        os.killpg(pid, 15)
+
+
+def shell_script(script):
+    """argv that runs a POSIX shell script: sh, or on Windows the bash of Git for Windows when there is one."""
+    if not WINDOWS:
+        return ['sh', '-c', script]
+    bash = shutil_which('bash')
+    return [bash, '-c', script] if bash else ['cmd', '/c', script]
+
+
+def pid_alive(pid):
+    if not WINDOWS:
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+    import ctypes  # os.kill(pid, 0) would send CTRL_C_EVENT on Windows
+    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return False
+    code = ctypes.c_ulong()
+    ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return code.value == 259  # STILL_ACTIVE
+
+
+def session_parent():
+    """The process that started this command – on Windows a restarted agentq is told its first one's parent."""
+    return int(os.environ.get('AGENTQ_PARENT') or os.getppid())
+
+
+def parent_gone(parent):
+    """The session that started this command ended (POSIX: it was re-parented to init)."""
+    return not pid_alive(parent) if WINDOWS else os.getppid() == 1
+
+
+def command_lines(pattern):
+    """Whether a running process's command line matches the pattern."""
+    if WINDOWS:
+        run = subprocess.run(['powershell', '-NoProfile', '-Command',
+                              'Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }'],
+                             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+        return any(re.search(pattern, line or '') for line in run.stdout.splitlines())
+    return subprocess.run(['pgrep', '-f', pattern], capture_output=True).returncode == 0
+
+
+APP_SESSIONS_DEFAULT = (os.path.join(os.environ.get('APPDATA') or '~', 'Claude', 'claude-code-sessions') if WINDOWS
+                        else '~/Library/Application Support/Claude/claude-code-sessions')
 TEMPLATE = os.path.join(PACKAGE, 'templates', 'dispatcher')
 DEFAULT_CONFIG = os.path.expanduser('~/.config/agentq/config.json')
 PROJECT_CONFIG = '.agentq.json'
@@ -182,7 +317,8 @@ def iso(moment):
 
 def gh(*args):
     for attempt in range(3):  # GitHub sometimes answers 502/503 or times out for a moment
-        run = subprocess.run(['gh', *args], capture_output=True, text=True)
+        run = subprocess.run([*(tool('gh') or ['gh']), *args], capture_output=True, text=True, encoding='utf-8',
+                             errors='replace')
         transient = re.search(r'\b50[234]\b|timeout|timed out|connection reset', run.stderr, re.I)
         if run.returncode == 0 or not transient or attempt == 2:
             break
@@ -211,7 +347,8 @@ def gh_pages(*args):
 
 
 def git(checkout, *args):
-    run = subprocess.run(['git', '-C', os.path.expanduser(checkout), *args], capture_output=True, text=True)
+    run = subprocess.run(['git', '-C', os.path.expanduser(checkout), *args], capture_output=True, text=True,
+                         encoding='utf-8', errors='replace')
     if run.returncode != 0:
         raise Fail(f"git {' '.join(args[:2])}: {run.stderr.strip()}")
     return run.stdout
@@ -228,8 +365,7 @@ def find_config(explicit):
     starts = [os.getcwd()]
     session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID')  # run from a scratch folder: the session's own project
     if session:
-        apps = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or
-                                  '~/Library/Application Support/Claude/claude-code-sessions')
+        apps = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or APP_SESSIONS_DEFAULT)
         for meta in glob.glob(os.path.join(glob.escape(apps), '*', '*', f'{glob.escape(session)}.json')):
             try:
                 with open(meta, encoding='utf-8') as f:
@@ -275,6 +411,8 @@ def load_config(path):
             raw = json.load(f)
     except FileNotFoundError:
         raise Fail(f'no config at {path} (copy config.example.json there, or pass --config)')
+    if isinstance(raw, dict) and set(raw) == {POINTER}:
+        return load_config(raw[POINTER])
     cfg = copy.deepcopy(raw)
     for key in ('owner_accounts', 'agent_account', 'repos', 'labels'):
         if not cfg.get(key):
@@ -303,6 +441,9 @@ def load_config(path):
     cfg['check_minutes'] = cfg.get('check_minutes', 60)
     cfg['stale_pr_days'] = cfg.get('stale_pr_days', 3)
     cfg['disk_min_gb'] = cfg.get('disk_min_gb', 30)
+    # one computer sorts new issues, runs the full tests and releases waits; another computer on the same project
+    # ("primary": false) only serves its own sessions and Codex workers
+    cfg['primary'] = cfg.get('primary', True)
     cfg['worktree_idle_hours'] = cfg.get('worktree_idle_hours', 12)  # merged, clean, untouched this long → removed; 0: off
     cfg['codex_model'] = cfg.get('codex_model', '')  # the model Codex workers start on; a role's codex_model wins
     cfg['clear_every'] = cfg.get('clear_every', 0)
@@ -314,13 +455,13 @@ def load_config(path):
     cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
     cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)
     cfg['app_sessions'] = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or cfg.get('app_sessions') or
-                                             '~/Library/Application Support/Claude/claude-code-sessions')
+                                             APP_SESSIONS_DEFAULT)
     cfg['transcripts'] = os.path.expanduser(os.environ.get('AGENTQ_TRANSCRIPTS') or cfg.get('transcripts') or
                                             '~/.claude/projects')
     cfg['links'] = [{'repo': l['repo'], 'about': l.get('about', '')} for l in cfg.get('links', [])]
     folder = cfg['dispatcher']['folder']
     cfg['team_dir'] = os.path.expanduser(folder) if folder else os.path.dirname(cfg['state_file'])
-    cfg['shots_dir'] = os.path.expanduser(cfg.get('shots_dir') or '~/.cache/agentq/shots')  # never beside a config in a repo
+    cfg['shots_dir'] = os.path.normpath(os.path.expanduser(cfg.get('shots_dir') or '~/.cache/agentq/shots'))  # never beside a config in a repo
     return cfg
 
 
@@ -332,7 +473,7 @@ def save_config(cfg, change):
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(raw, f, indent=2, ensure_ascii=False)
         f.write('\n')
-    os.replace(tmp, cfg['_path'])
+    replace_file(tmp, cfg['_path'])
     return load_config(cfg['_path'])
 
 
@@ -346,10 +487,10 @@ class state_lock:
 
     def __enter__(self):
         self.handle = open(self.path, 'a')
-        fcntl.flock(self.handle, fcntl.LOCK_EX)
+        lock_file(self.handle)
 
     def __exit__(self, *exc):
-        self.handle.close()
+        unlock_file(self.handle)
 
 
 def read_state_file(cfg):
@@ -364,7 +505,7 @@ def write_state_file(cfg, data):
     tmp = cfg['state_file'] + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
-    os.replace(tmp, cfg['state_file'])
+    replace_file(tmp, cfg['state_file'])
 
 
 def load_state(cfg):
@@ -431,8 +572,7 @@ def checked_label(cfg, role):
     return cfg['labels']['checked'].format(role=role['role'])
 
 
-APP_SESSIONS = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or
-                                  '~/Library/Application Support/Claude/claude-code-sessions')
+APP_SESSIONS = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or APP_SESSIONS_DEFAULT)
 
 
 def session_of(role, sid=None):
@@ -455,10 +595,26 @@ def pushes(role):
     return role.get('agent', 'claude') in ('claude', 'both') and role.get('active') != 0
 
 
-def session_held(state, role, repo, issues):
-    """The tasks this role's Claude sessions hold – not those a Codex worker took."""
+def session_held(cfg, state, role, repo, issues):
+    """The tasks this role's Claude sessions hold – not those a Codex worker or another computer took."""
     holders = state.get('holders', {})
-    return [i for i in issues if holders.get(f"{repo}#{i['number']}") in (None, *role['sessions'])]
+    return [i for i in issues if holders.get(f"{repo}#{i['number']}") in role['sessions'] or (
+        f"{repo}#{i['number']}" not in holders and not taken_elsewhere(cfg, state, repo, i['number']))]
+
+
+def taken_elsewhere(cfg, state, repo, number):
+    """A task in progress that no worker of this computer holds: its last claim names another computer (the same
+    project worked from two computers). Read once per task while it is in progress."""
+    ref = f'{repo}#{number}'
+    hosts = state.setdefault('claim_hosts', {})
+    if ref not in hosts:
+        try:
+            comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
+        except Fail:
+            return False
+        claims = [m.group(1) for c in comments for m in [CLAIM_MARK.search(c.get('body') or '')] if m]
+        hosts[ref] = claims[-1].split('/')[0] if claims else ''
+    return hosts[ref] not in ('', socket.gethostname())
 
 
 def capacity(role):
@@ -839,7 +995,7 @@ def mark_delivered(cfg, repo, comments, keep_hours):
         tmp = delivered_path(cfg) + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=1)
-        os.replace(tmp, delivered_path(cfg))
+        replace_file(tmp, delivered_path(cfg))
 
 
 def agent_set_working(cfg, state, repo, issue):
@@ -935,8 +1091,9 @@ def check_held(cfg, state, repo, issues, start, plan):
                     quiet_holder(cfg, state, repo, ref, role, holder, last, start,
                                  lambda: message_codex(codex['thread'], nudge_text(cfg, ref, iso(last))), release=False)
                 continue
-            if not pushes(role) or (holder and holder not in role['sessions']):
-                continue  # another worker holds it: no session to watch here; health reports a stuck task
+            if not pushes(role) or (holder and holder not in role['sessions']) or (
+                    not holder and taken_elsewhere(cfg, state, repo, issue['number'])):
+                continue  # another worker or another computer holds it: nothing to watch here; health reports it
             sid = holder_of(state, role, ref)
             if not sid:
                 continue
@@ -950,7 +1107,7 @@ def check_held(cfg, state, repo, issues, start, plan):
                 continue
             quiet_holder(cfg, state, repo, ref, role, sid, last, start,
                          lambda: plan.append(('nudge', ref, role, issue['title'], iso(last), sid)))
-    for table in (nudges, checks, state.setdefault('holders', {})):
+    for table in (nudges, checks, state.setdefault('holders', {}), state.setdefault('claim_hosts', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
     resolved = sorted(told - {r for r, n in nudges.items() if n.get('told')})
@@ -1006,13 +1163,13 @@ def check_tests(cfg, state, repo, start, plan):
     if run:
         code_file = f"{base}.{run['id']}.code"
         if os.path.exists(code_file):
-            with open(code_file) as f:
+            with open(code_file, encoding='utf-8') as f:
                 code = f.read().strip()
-            sha = open(f"{base}.{run['id']}.sha").read().strip() if os.path.exists(f"{base}.{run['id']}.sha") else '?'
+            sha = open(f"{base}.{run['id']}.sha", encoding='utf-8').read().strip() if os.path.exists(f"{base}.{run['id']}.sha") else '?'
             ok = code == '0'
         elif start - parse_time(run['at']) > dt.timedelta(minutes=t['timeout_minutes']):
             try:
-                os.killpg(run['pid'], 15)
+                kill_tree(run['pid'])
             except OSError:
                 pass
             ok, sha = False, run.get('sha', '?')
@@ -1046,8 +1203,8 @@ def check_tests(cfg, state, repo, start, plan):
     script = (f"cd {co} && git fetch -q origin && git checkout -q --detach origin/{shlex_quote(t['branch'])} && "
               f"git rev-parse HEAD > {shlex_quote(base + '.' + run_id + '.sha')} && ({t['full']}); "
               f"echo $? > {shlex_quote(base + '.' + run_id + '.code')}")
-    with open(f'{base}.{run_id}.log', 'w') as log:
-        proc = subprocess.Popen(['sh', '-c', script], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    with open(f'{base}.{run_id}.log', 'w', encoding='utf-8') as log:
+        proc = subprocess.Popen(shell_script(script), stdout=log, stderr=subprocess.STDOUT, **detached())
     ts['running'] = {'id': run_id, 'pid': proc.pid, 'at': iso(start)}
     ts['since'] = iso(start)
 
@@ -1085,7 +1242,9 @@ def build_plan(cfg, state, start):
     boards = {}
     for repo in cfg['repos']:
         issues = real_board(cfg, state, repo)
-        release_waits(cfg, state, repo, issues, start)
+        primary = cfg['primary']
+        if primary:
+            release_waits(cfg, state, repo, issues, start)
         boards[repo] = {'at': iso(start), 'issues': issues}
         taken = set()
         news, fresh = {}, []
@@ -1093,7 +1252,8 @@ def build_plan(cfg, state, start):
         urgent = state.setdefault('urgent', {})
         for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '100',
                             '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments,body,author'):
-            mark_urgent(cfg, repo, item, issues, urgent)
+            if primary:
+                mark_urgent(cfg, repo, item, issues, urgent)
             answered_at = max([c['createdAt'] for c in item.get('comments', [])
                                if login_of(c) == cfg['agent_account']] or [''])
             # first run: only words on an open issue that waits for the owner or is in progress, with no agent
@@ -1118,6 +1278,9 @@ def build_plan(cfg, state, start):
             role = role_of_labels(cfg, names)
             ref = f'{repo}#{number}'
             is_open = item.get('state', 'OPEN') == 'OPEN'
+            if is_open and not primary and (waiting_word & set(names) or (
+                    labels['working'] not in names and (cfg['skip'] - {labels['health']}) & set(names))):
+                continue  # the main computer's dispatcher hands it back
             if is_open and waiting_word & set(names):
                 role = role or default_role(cfg)
                 plan.append(('answered', ref, role, item['title'], None))
@@ -1137,15 +1300,16 @@ def build_plan(cfg, state, start):
                 plan.append(('forward', ref, role, item['title'], min(times), holder_of(state, role, ref)))
             # an open issue without a role is classified below; a queued one carries the words in its brief
         check_held(cfg, state, repo, issues, start, plan)
-        check_prs(cfg, state, repo, start, issues)
-        check_tests(cfg, state, repo, start, plan)
+        if primary:
+            check_prs(cfg, state, repo, start, issues)
+            check_tests(cfg, state, repo, start, plan)
         wake_codex(cfg, state, repo, issues, start)
         cache = {}
         for role in cfg['roles']:
             if not pushes(role):
                 continue  # its workers take their own tasks with `agentq next`
             pulling = waiting_workers(cfg, role) & set(role['pool'])  # they take their next task themselves
-            slots = capacity(role) - len(session_held(state, role, repo, busy_with(cfg, issues, role))) \
+            slots = capacity(role) - len(session_held(cfg, state, role, repo, busy_with(cfg, issues, role))) \
                 - len(pulling) - (role['role'] in taken)
             picked = []
             while slots > 0:
@@ -1155,13 +1319,13 @@ def build_plan(cfg, state, start):
                 picked.append(issue['number'])
                 plan.append(('assign', f"{repo}#{issue['number']}", role, issue['title'], None))
                 slots -= 1
-            if slots > 0 and role['mode'] == 'checker' and not busy_with(cfg, issues, role) and role['sessions'] and \
+            if primary and slots > 0 and role['mode'] == 'checker' and not busy_with(cfg, issues, role) and role['sessions'] and \
                     batch_ready(cfg, role, unchecked(cfg, state, repo, role, cache), start):
                 plan.append(('batch', repo, role, None, None))
         skip = cfg['skip'] | {labels['working'], labels['batch']}
         loose = [i for i in sorted(issues, key=lambda i: i['number'])
                  if not role_of_labels(cfg, labels_of(i)) and not skip & set(labels_of(i)) and trusted(cfg, i)]
-        for issue in loose[:10]:
+        for issue in loose[:10] if primary else []:
             plan.append(('classify', f"{repo}#{issue['number']}", None, issue['title'], None))
     save_board(cfg, boards)
     return plan
@@ -1212,9 +1376,7 @@ def render_plan(cfg, plan, start, clear=False, wake=False):
 def watch_lock(cfg, who=None):
     """One watcher per project and agent; with dispatcher agent "both" a Claude and a Codex watcher may run side by side."""
     handle = open(cfg['state_file'] + (f'.watch.{who}.lock' if who else '.watch.lock'), 'a')
-    try:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    if not lock_file(handle, wait=False):
         handle.close()
         return None
     return handle
@@ -1243,11 +1405,23 @@ def running_in():
     return None
 
 
-def restart_if_updated(code):
-    """agentq changed while this loop ran: carry on in the new version, without waking anyone."""
-    if os.path.getmtime(os.path.realpath(__file__)) != code:
-        sys.stdout.flush()
-        os.execv(sys.executable, [sys.executable, os.path.realpath(__file__), *sys.argv[1:]])
+def restart_if_updated(code, lock=None, detach=False):
+    """agentq changed while this loop ran: carry on in the new version, without waking anyone. Windows has no exec:
+    the new version runs as a child that this process waits for (a detached one is started and left), after this
+    process let go of its lock."""
+    if os.path.getmtime(SELF) == code:
+        return
+    sys.stdout.flush()
+    args = [sys.executable, SELF, *sys.argv[1:]]
+    if not WINDOWS:
+        os.execv(sys.executable, args)
+    if lock:
+        unlock_file(lock)
+    os.environ['AGENTQ_PARENT'] = str(session_parent())  # the session, not this process, decides when to stop
+    if detach:
+        subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=subprocess.STDOUT, **detached())
+        sys.exit(0)
+    sys.exit(subprocess.call(args))
 
 
 # ---------- Codex tasks ----------
@@ -1258,30 +1432,55 @@ CODEX_HOME = os.path.expanduser(os.environ.get('CODEX_HOME') or '~/.codex')
 
 
 def codex_cli():
-    """AGENTQ_CODEX, else `codex` on PATH, else the Codex app's own CLI."""
+    """AGENTQ_CODEX, else `codex` on PATH, else the Codex app's own CLI (a command: a list)."""
     if 'AGENTQ_CODEX' in os.environ:
-        return os.environ['AGENTQ_CODEX'] or None
+        return tool('codex')
     bundled = sorted(glob.glob('/Applications/*.app/Contents/Resources/codex-cli/*.app/Contents/MacOS/codex'))
-    return shutil_which('codex') or (bundled[-1] if bundled else None)
+    if WINDOWS:
+        local = os.environ.get('LOCALAPPDATA') or ''
+        bundled = sorted(glob.glob(os.path.join(glob.escape(local), 'Programs', '*', 'resources', 'codex-cli', 'codex.exe')))
+    return tool('codex') or ([bundled[-1]] if bundled else None)
 
 
 def codex_loaded(thread):
     """A process – normally the Codex app – has the task loaded, so it runs a queued message once the task is idle."""
     lock = os.path.join(CODEX_HOME, 'thread-writer-locks', f'{thread}.lock')
+    if not os.path.exists(lock):
+        return False
+    if WINDOWS:  # no lsof: a file another process holds open or locked cannot be locked here
+        try:
+            with open(lock, 'a') as handle:
+                if not lock_file(handle, wait=False):
+                    return True
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                return False
+        except OSError:
+            return True
     lsof = shutil_which('lsof') or '/usr/sbin/lsof'
-    if not os.path.exists(lock) or not os.path.exists(lsof):
-        return os.path.exists(lock)
+    if not os.path.exists(lsof):
+        return True
     try:
         return bool(subprocess.run([lsof, '-t', lock], capture_output=True, text=True, timeout=30).stdout.strip())
     except subprocess.TimeoutExpired:
         return False
 
 
+_app_seen = {}
+
+
 def codex_app_running():
     if 'AGENTQ_CODEX_APP' in os.environ:
         return os.environ['AGENTQ_CODEX_APP'] == '1'
-    return subprocess.run(['pgrep', '-f', r'\.app/Contents/Resources/codex-cli/.*app-server'],
-                          capture_output=True).returncode == 0
+    if _app_seen and time.time() - _app_seen['at'] < 30:  # asking Windows for command lines takes a second or two
+        return _app_seen['up']
+    pattern = r'codex(\.exe)?"?\s.*app-server' if WINDOWS else r'\.app/Contents/Resources/codex-cli/.*app-server'
+    try:
+        up = command_lines(pattern)
+    except (OSError, subprocess.TimeoutExpired):
+        up = False
+    _app_seen.update(at=time.time(), up=up)
+    return up
 
 
 def codex_reachable(thread):
@@ -1306,8 +1505,8 @@ def message_codex(thread, text):
     if not cli:
         return False, 'no Codex CLI found (set AGENTQ_CODEX to its path)'
     try:
-        run = subprocess.run([cli, 'queue', '--thread', thread, '--message', text], capture_output=True, text=True,
-                             timeout=60)
+        run = subprocess.run([*cli, 'queue', '--thread', thread, '--message', text], capture_output=True, text=True,
+                             encoding='utf-8', errors='replace', timeout=60)
     except OSError as e:
         return False, f'codex queue: {e}'
     except subprocess.TimeoutExpired:
@@ -1316,8 +1515,14 @@ def message_codex(thread, text):
         return False, one_line(run.stderr or run.stdout or f'codex queue exited with {run.returncode}', 300)
     if not codex_loaded(thread) and codex_app_running():
         try:
-            opened = subprocess.run([os.environ.get('AGENTQ_OPEN') or 'open', '-g', f'codex://threads/{thread}'],
-                                    capture_output=True, text=True, timeout=60)
+            url = f'codex://threads/{thread}'
+            if 'AGENTQ_OPEN' in os.environ:
+                argv = [*tool('open'), '-g', url]
+            elif WINDOWS:  # Windows cannot open it in the background; the Codex window may come forward
+                argv = ['cmd', '/c', 'start', '', url]
+            else:
+                argv = ['open', '-g', url]
+            opened = subprocess.run(argv, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
         except (OSError, subprocess.TimeoutExpired) as e:
             return True, f'queued, but opening the task failed: {e}'
         if opened.returncode != 0:
@@ -1338,13 +1543,12 @@ def start_codex_watcher(cfg, opts, who):
         print('agentq watch: already running – it sends each plan to this task now. End your turn.')
         return 0
     lock.close()
-    args = [sys.executable, os.path.realpath(__file__), '--config', cfg['_path'], 'watch', '--wake']
+    args = [sys.executable, SELF, '--config', cfg['_path'], 'watch', '--wake']
     for name in ('interval', 'max_minutes'):
         if getattr(opts, name) is not None:
             args += [f"--{name.replace('_', '-')}", str(getattr(opts, name))]
     with open(cfg['state_file'] + '.watch.log', 'a') as log:
-        child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                 start_new_session=True)
+        child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **detached())
     for _ in range(50):  # up to 10 s for it to take its lock
         if child.poll() is not None:
             break
@@ -1373,16 +1577,17 @@ def cmd_watch(cfg, opts):
         print('agentq watch: already running – nothing to do.')
         return 0
     interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
-    code = os.path.getmtime(os.path.realpath(__file__))
+    code = os.path.getmtime(SELF)
+    parent = session_parent()
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     while True:
         if deadline is not None and time.time() >= deadline:
             print('agentq watch: no work yet – run it again.')
             return 0
-        if os.getppid() == 1 and not opts.wake:  # started with & or nohup: its end would wake nobody
+        if not opts.wake and parent_gone(parent):  # started with & or nohup: its end would wake nobody
             print('agentq watch: not started by the session (its parent is gone) – start it with run_in_background.')
             return 1
-        restart_if_updated(code)
+        restart_if_updated(code, lock, detach=opts.wake)
         state = load_state(cfg)
         start = now()
         work = copy.deepcopy(state)
@@ -1526,7 +1731,7 @@ def save_board(cfg, boards):
     tmp = cfg['state_file'] + '.board.json.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(boards, f)
-    os.replace(tmp, cfg['state_file'] + '.board.json')
+    replace_file(tmp, cfg['state_file'] + '.board.json')
 
 
 def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
@@ -1608,7 +1813,7 @@ def cmd_next(cfg, opts):
         return worker in role['sessions'] or pulls(role)
     wanted = [role_by_name(cfg, opts.role)] if opts.role else cfg['roles']
     roles = [r for r in wanted if may(r)]
-    again = ' '.join([shlex_quote(os.path.realpath(__file__)), 'next', *([shlex_quote(opts.role)] if opts.role else []),
+    again = ' '.join([self_command(), 'next', *([shlex_quote(opts.role)] if opts.role else []),
                       '--as', shlex_quote(worker)])
     if thread:  # the watcher wakes this Codex task when one of these roles has work
         record = {'thread': thread, 'host': host, 'roles': [r['role'] for r in wanted], 'next': again}
@@ -1639,12 +1844,13 @@ def cmd_next(cfg, opts):
         return agent == 'claude' and (role.get('active') == 0 or (bool(role['sessions']) and not ids & set(role['pool'])))
     resting = [r for r in roles if rests(r)]
     wait = opts.wait and here != 'codex'
-    code = os.path.getmtime(os.path.realpath(__file__))
+    code = os.path.getmtime(SELF)
+    parent = session_parent()
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     try:
         while True:
             if wait:
-                if os.getppid() == 1:
+                if parent_gone(parent):
                     print('agentq next: its session is gone – stop.')
                     return 1
                 mark_waiting(cfg, worker, [r['role'] for r in roles])
@@ -1752,7 +1958,7 @@ def wake_codex(cfg, state, repo, issues, start):
             if issue['number'] == number:
                 issue['labels'] = issue['labels'] + [{'name': cfg['labels']['working']}]
         text = cfg['texts']['wake_task'].format(ref=ref, role=role['role'], worker=worker,
-                                                agentq=shlex_quote(os.path.realpath(__file__)), next=info.get('next'))
+                                                agentq=self_command(), next=info.get('next'))
         accepted, error = message_codex(info['thread'], text)
         if accepted:  # it may run any moment: the task stays its own; a reminder follows if it stays quiet
             info['error'] = error
@@ -1818,7 +2024,7 @@ def cmd_assign(cfg, opts):
         relabel(repo, number, add=[role['label']], remove=remove)
         print(f"{ref} → {role['role']}, in its queue; it takes its tasks itself (agentq next). Nothing to send.")
         return
-    busy = session_held(state, role, repo, busy_with(cfg, real_board(cfg, state, repo), role, but=number))
+    busy = session_held(cfg, state, role, repo, busy_with(cfg, real_board(cfg, state, repo), role, but=number))
     if len(busy) >= capacity(role) or not role['sessions']:
         comment(cfg, repo, number, cfg['texts']['queued'].format(role=role['role']), who)
         relabel(repo, number, add=[role['label']], remove=remove)
@@ -1856,7 +2062,7 @@ def repo_file(match):
     """A file in a (maybe private) repository, read through gh as the AI account."""
     owner, repo, ref, path = [g for g in match.groups() if g is not None]
     path = urllib.parse.quote(urllib.parse.unquote(path))
-    run = subprocess.run(['gh', 'api', f'repos/{owner}/{repo}/contents/{path}?ref={ref}', '-H',
+    run = subprocess.run([*(tool('gh') or ['gh']), 'api', f'repos/{owner}/{repo}/contents/{path}?ref={ref}', '-H',
                           'Accept: application/vnd.github.raw'], capture_output=True)
     if run.returncode != 0:
         raise OSError(f'the AI account cannot read {owner}/{repo} (the owner invites it with Read access)')
@@ -1995,7 +2201,7 @@ def save_lessons(cfg, lessons):
     tmp = lessons_path(cfg) + '.tmp'
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(lessons, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, lessons_path(cfg))
+    replace_file(tmp, lessons_path(cfg))
     write_roles(cfg, lessons)
 
 
@@ -2281,15 +2487,18 @@ def sweep_worktrees(cfg):
         return []
 
     def run(*args, cwd=checkout):
-        return subprocess.run(['git', '-C', cwd, *args], capture_output=True, text=True)
+        return subprocess.run(['git', '-C', cwd, *args], capture_output=True, text=True, encoding='utf-8',
+                              errors='replace')
     run('worktree', 'prune')
     branch = cfg['tests']['branch']
     mains = [ref for ref in (f'origin/{branch}', branch) if run('rev-parse', '-q', '--verify', ref).returncode == 0]
-    try:
-        out = subprocess.run(['lsof', '-a', '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=60).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return []  # cannot tell who works where: remove nothing
-    cwds = {os.path.realpath(line[1:]) for line in out.splitlines() if line.startswith('n')}
+    cwds = set()
+    if not WINDOWS:  # Windows itself refuses to remove a folder a process works in
+        try:
+            out = subprocess.run(['lsof', '-a', '-d', 'cwd', '-Fn'], capture_output=True, text=True, timeout=60).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return []  # cannot tell who works where: remove nothing
+        cwds = {os.path.realpath(line[1:]) for line in out.splitlines() if line.startswith('n')}
     trees, cur = [], {}
     for line in run('worktree', 'list', '--porcelain').stdout.splitlines() + ['']:
         if line:
@@ -2302,7 +2511,8 @@ def sweep_worktrees(cfg):
     for tree in trees[1:]:  # the first is the project's own checkout
         path = tree['worktree']
         real = os.path.realpath(path)
-        if tree.get('locked') or tree.get('prunable') or '/.claude/worktrees/' in real + '/' or not os.path.isdir(path):
+        if tree.get('locked') or tree.get('prunable') or '/.claude/worktrees/' in real.replace(os.sep, '/') + '/' \
+                or not os.path.isdir(path):
             continue
         if any(c == real or c.startswith(real + '/') for c in cwds):
             continue
@@ -2317,7 +2527,7 @@ def sweep_worktrees(cfg):
         if status.returncode or status.stdout.strip():
             continue
         if run('worktree', 'remove', path).returncode == 0:
-            removed.append(path)
+            removed.append(os.path.normpath(path))  # git writes C:/… on Windows
     return removed
 
 
@@ -2342,11 +2552,10 @@ def cmd_health(cfg, opts):
     if beat.get('error'):
         problems.append(texts['health_error'].format(error=beat['error']))
     stale = dt.timedelta(hours=cfg['stale_hours'])
-    disk = os.statvfs(os.path.dirname(cfg['state_file']) or '.')
-    free = disk.f_bavail * disk.f_frsize / 1e9
+    free = shutil.disk_usage(os.path.dirname(cfg['state_file']) or '.').free / 1e9
     if cfg['disk_min_gb'] and free < cfg['disk_min_gb']:
         problems.append(texts['health_disk'].format(free=f'{free:.0f}', limit=cfg['disk_min_gb']))
-    for repo in cfg['repos']:
+    for repo in cfg['repos'] if cfg['primary'] else []:  # the whole board: the main computer's report
         for issue in board(repo):
             if cfg['labels']['working'] in labels_of(issue) and moment - parse_time(issue['updatedAt']) > stale:
                 problems.append(texts['health_stale'].format(ref=f"{repo}#{issue['number']}",
@@ -2363,7 +2572,9 @@ def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):
     texts = cfg['texts']
     repo = cfg['repos'][0]
     label = cfg['labels']['health']
-    found = gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '5', '--json', 'number')
+    title = texts['health_title'] if cfg['primary'] else f"{texts['health_title']} ({socket.gethostname().split('.')[0]})"
+    found = [i for i in gh_json('issue', 'list', '-R', repo, '--state', 'open', '--label', label, '--limit', '20',
+                                '--json', 'number,title') if i.get('title', title) == title]  # each computer its own
     if not found and state.get('health_issue'):  # created a moment ago: GitHub's list may not show it yet
         known = view(repo, state['health_issue'])
         found = [{'number': state['health_issue']}] if known.get('state') == 'OPEN' else []
@@ -2382,7 +2593,7 @@ def report_health(cfg, state, problems, needs_owner=False, close=True, done=()):
         relabel(repo, number, add=extra)
         print(f"problems reported on {repo}#{number}:\n{report}")
     elif problems:
-        number = create_issue(repo, texts['health_title'], f'🤖 health:\n{report}', [label] + extra)
+        number = create_issue(repo, title, f'🤖 health:\n{report}', [label] + extra)
         state['health_issue'] = number
         print(f'problems reported in {repo}#{number}:\n{report}')
     elif found and close:
@@ -2474,7 +2685,7 @@ def install_dispatcher(cfg, folder):
     """Copy the dispatcher's template, link the config. CLAUDE.md is agentq's own and follows the template;
     other files (examples/) are copied only when missing."""
     folder = os.path.abspath(os.path.expanduser(folder))
-    agentq = os.path.realpath(__file__)
+    agentq = self_command()
     for base, _, files in os.walk(TEMPLATE):
         for name in files:
             source = os.path.join(base, name)
@@ -2493,15 +2704,15 @@ def install_dispatcher(cfg, folder):
             with open(target, 'w', encoding='utf-8') as f:
                 f.write(text)
             print(f'dispatcher: {target} written')
-    link = os.path.join(folder, PROJECT_CONFIG)
-    if not os.path.lexists(link):
-        os.symlink(cfg['_path'], link)
-        print(f'dispatcher: {link} → {cfg["_path"]}')
+    at = os.path.join(folder, PROJECT_CONFIG)
+    if link(cfg['_path'], at):
+        print(f'dispatcher: {at} → {cfg["_path"]}')
     return folder
 
 
 def exclude_locally(top, *names):
     """Keep agentq's links out of the project's git without touching its .gitignore."""
+    names = [n.replace(os.sep, '/') for n in names]  # git patterns use /, also on Windows
     path = git(top, 'rev-parse', '--git-path', 'info/exclude').strip()
     path = path if os.path.isabs(path) else os.path.join(top, path)
     have = open(path, encoding='utf-8').read().split('\n') if os.path.exists(path) else []
@@ -2512,11 +2723,27 @@ def exclude_locally(top, *names):
             f.write(('\n' if have and have[-1] else '') + '\n'.join(missing) + '\n')
 
 
+POINTER = 'agentq_config'  # a .agentq.json that only names the real config: Windows without symlink rights
+
+
 def link(target, at):
+    """A symlink; on Windows without the right to make one, a junction for a folder and a pointer file for a config."""
     if os.path.lexists(at):
         return False
     os.makedirs(os.path.dirname(at), exist_ok=True)
-    os.symlink(target, at)
+    try:
+        os.symlink(target, at, target_is_directory=os.path.isdir(target))
+    except OSError:
+        if not WINDOWS:
+            raise
+        if os.path.isdir(target):
+            run = subprocess.run(['cmd', '/c', 'mklink', '/J', at, target], capture_output=True, text=True,
+                                 encoding='utf-8', errors='replace')
+            if run.returncode != 0:
+                raise Fail(f'cannot link {at} to {target}: {run.stderr.strip() or run.stdout.strip()}')
+        else:
+            with open(at, 'w', encoding='utf-8') as f:
+                json.dump({POINTER: target}, f)
     return True
 
 
@@ -2539,6 +2766,9 @@ def cmd_init(opts):
             raw = json.load(f)
         raw.update({'owner_accounts': opts.owner, 'agent_account': who.get('login') or '', 'repos': [repo],
                     'checkout': top})
+        raw.pop('live', None)  # the example's restart command is a placeholder: `agentq live` sets a real one
+        if opts.second:
+            raw['primary'] = False
         raw['dispatcher']['folder'] = os.path.expanduser(f"~/agent-team/{repo.replace('/', '-')}-dispatcher")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
@@ -2747,7 +2977,7 @@ def cmd_workers(cfg, opts):
           f"effort, paste, Send.")
     for role, name, title, effort, model in missing:
         print(f"\n--- {title} (model: {model or 'the app default'}, reasoning effort: {effort}) ---\n" + CODEX_WORKER.format(role=shlex_quote(role), name=shlex_quote(name),
-                                                           agentq=shlex_quote(os.path.realpath(__file__))))
+                                                           agentq=self_command()))
 
 
 def cmd_stats(cfg, opts):
@@ -3018,6 +3248,8 @@ def main(argv=None):
     ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
     ini.add_argument('--project', help='the project folder (default: here)')
     ini.add_argument('--codex', action='store_true', help='also point AGENTS.md at the skill (codex and other agents)')
+    ini.add_argument('--second', action='store_true', help='the team already runs on another computer for this project: '
+                                                         'this one serves only its own sessions and Codex workers')
     for name, parser in sub.choices.items():  # agents add `--as <role>` out of habit: accepted everywhere
         if name not in ('next', 'open') and not any('--as' in a.option_strings for a in parser._actions):
             parser.add_argument('--as', dest='who', help=argparse.SUPPRESS)

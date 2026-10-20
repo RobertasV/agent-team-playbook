@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.81 – 2026-10-20
+- agentq runs on Windows: a portable file lock (msvcrt), `shutil.disk_usage`, `taskkill /T` for a test run past its time, Windows process checks instead of `pgrep`/`lsof`, a restart into a new version without `exec`, the Claude app's sessions under `%APPDATA%`, UTF-8 for gh, git and its own output, a junction or a pointer file where symlinks are not allowed, and the commands it prints for the agents in a form Git Bash, PowerShell and cmd run. Git exclude patterns use `/` everywhere.
+- The same project from two computers: `agentq init --second` makes a computer serve only its own sessions and Codex workers (`"primary": false`); sorting, full test runs, batches, handing back answered or waiting tasks, PR checks and others' stuck tasks stay with the first. A task in progress whose last claim names another computer is never reminded, released or counted against this computer's sessions. Each computer reports its health in its own issue.
+- CI runs the tests on Linux and Windows; the fakes are Python scripts (`AGENTQ_GH`, `AGENTQ_CODEX`, `AGENTQ_OPEN`), so the tests need no shell.
+
 ## 0.2.80 – 2026-10-20
 - A claim made before a task was handed back (`agentq route`) no longer counts: for ten minutes it kept anyone else from taking the task.
 

@@ -1,5 +1,7 @@
 """agentq against a fake `gh`: python3 -m unittest discover -s tests"""
 import datetime
+import importlib.util
+import pathlib
 import json
 import os
 import subprocess
@@ -7,10 +9,31 @@ import sys
 import tempfile
 import time
 import unittest
+from importlib.machinery import SourceFileLoader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL = os.path.join(ROOT, 'tools', 'agentq')
 FAKE = os.path.join(ROOT, 'tests', 'fake_gh.py')
+
+
+def load_agentq():
+    spec = importlib.util.spec_from_loader('agentq_tool', SourceFileLoader('agentq_tool', TOOL))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+AQ = load_agentq()  # its portable file lock, for tests that pretend another watcher runs
+
+
+def fake_script(path, log=None, fail=None):
+    """A stand-in for codex or open, as a Python file agentq runs with this Python (no shebang on Windows): it logs
+    its arguments like `echo "$@"`, or fails with a message."""
+    with open(path, 'w', encoding='utf-8') as f:
+        if fail is not None:
+            f.write('import sys\n' + (f'sys.stderr.write({fail!r} + "\\n")\n' if fail else '') + 'sys.exit(1)\n')
+        else:
+            f.write(f'import sys\nwith open({log!r}, "a", encoding="utf-8") as f:\n    f.write(" ".join(sys.argv[1:]) + "\\n")\n')
 REPO = 'acme/app'
 OTHER = 'acme/site'
 
@@ -26,18 +49,11 @@ def said(login, body, at):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.dir = tempfile.TemporaryDirectory()
+        self.dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)  # Windows: a watcher still has a file open
         d = self.dir.name
         os.makedirs(os.path.join(d, 'bin'))
-        gh = os.path.join(d, 'bin', 'gh')
-        with open(gh, 'w') as f:
-            f.write(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE}" "$@"\n')
-        os.chmod(gh, 0o755)
         for name in ('codex', 'open'):  # never the real Codex: these only log what agentq asked of them
-            fake = os.path.join(d, 'bin', f'fake-{name}')
-            with open(fake, 'w') as f:
-                f.write(f'#!/bin/sh\necho "$@" >> "{d}/{name}.log"\n')
-            os.chmod(fake, 0o755)
+            fake_script(os.path.join(d, 'bin', f'fake_{name}.py'), log=os.path.join(d, f'{name}.log'))
         self.log = os.path.join(d, 'gh.log')
         self.fixture = os.path.join(d, 'fixture.json')
         self.config = os.path.join(d, 'config.json')
@@ -68,7 +84,7 @@ class Base(unittest.TestCase):
 
     def faked(self, name):
         path = os.path.join(self.dir.name, f'{name}.log')
-        return open(path).read() if os.path.exists(path) else ''
+        return open(path, encoding='utf-8').read() if os.path.exists(path) else ''
 
     def state(self, change=None):
         path = self.config + '.state.json'
@@ -80,13 +96,14 @@ class Base(unittest.TestCase):
         return data
 
     def env(self, now='2026-01-02T12:00:00Z'):
-        return {**os.environ, 'PATH': os.path.join(self.dir.name, 'bin') + os.pathsep + os.environ['PATH'],
+        return {**os.environ, 'AGENTQ_GH': FAKE, 'USERPROFILE': os.path.join(self.dir.name, 'home'),
+                'PYTHONUTF8': '0',  # agentq as it runs for a user: on Windows without Python's UTF-8 mode
                 'FAKE_GH_LOG': self.log, 'FAKE_GH_FIXTURE': self.fixture, 'AGENTQ_NOW': now,
                 'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': '',
                 'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx'),
                 'CLAUDECODE': '', 'CODEX_THREAD_ID': '', 'CODEX_SANDBOX': '', 'CLAUDE_CODE_HOST_SESSION_ID': '',
-                'AGENTQ_CODEX': os.path.join(self.dir.name, 'bin', 'fake-codex'), 'AGENTQ_CODEX_APP': '1',
-                'AGENTQ_OPEN': os.path.join(self.dir.name, 'bin', 'fake-open'),
+                'AGENTQ_CODEX': os.path.join(self.dir.name, 'bin', 'fake_codex.py'), 'AGENTQ_CODEX_APP': '1',
+                'AGENTQ_OPEN': os.path.join(self.dir.name, 'bin', 'fake_open.py'),
                 'CODEX_HOME': os.path.join(self.dir.name, 'codexhome')}
 
     def body(self, call):
@@ -337,6 +354,43 @@ class TeamTest(Base):
         open(path, 'a').close()
         moment = datetime.datetime.fromisoformat(quiet_since.replace('Z', '+00:00')).timestamp()
         os.utime(path, (moment, moment))
+
+    def config_change(self, **values):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg.update(values)
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+
+    def test_a_second_computer_serves_only_its_own_sessions(self):
+        self.config_change(primary=False)  # the team already runs on another computer for this project
+        self.data(self.board())
+        out = self.run_tool('watch', '--once', now=T0).stdout
+        self.assertIn(f'next task for programmer: run `agentq assign {REPO}#2 programmer`', out)  # its own session
+        self.assertNotIn('classify', out)  # sorting, batches and test runs are the main computer's
+        self.assertNotIn('a batch is ready', out)
+
+    def test_a_task_another_computer_took_is_left_to_it(self):
+        claim = {'id': 5, 'user': {'login': 'bot'}, 'created_at': '2026-01-02T09:00:00Z',
+                 'body': '🤖 programmer: taking this.\n<!-- agentq:claim otherpc/programmer/abc -->'}
+        self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z'),
+                                   issue(8, 'Menu', ['prog'])]},
+                   'api': {f'repos/{REPO}/issues/7/comments': [claim]}})
+        self.session('local_p', '2026-01-02T11:00:00Z')
+        out = self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout
+        self.assertNotIn(f'holds {REPO}#7', out)  # never reminded or released here
+        self.assertIn(f'next task for programmer: run `agentq assign {REPO}#8 programmer`', out)  # its session is free
+        self.assertEqual(self.state()['claim_hosts'], {f'{REPO}#7': 'otherpc'})
+
+    def test_a_second_computer_reports_its_health_in_its_own_issue(self):
+        self.config_change(primary=False, disk_min_gb=10 ** 9)
+        report = issue(60, 'Agent team health', ['agent health'])  # the main computer's
+        self.data({REPO: {'open': [report], 'next': 61}})
+        out = self.run_tool('health').stdout
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertTrue(made[made.index('--title') + 1].startswith('Agent team health ('))
+        self.assertIn('GB free on this computer', out)
+        self.assertEqual(self.calls(['issue', 'comment']), [])  # nothing written on the main computer's issue
 
     def test_a_quiet_session_holding_a_task_is_reminded_once_then_the_owner_is_told(self):
         self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z')], 'next': 70}})
@@ -641,8 +695,7 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.as_codex('next', 'designer', '--as', 'cx')
         self.rollout('t1', T0)
-        with open(os.path.join(self.dir.name, 'bin', 'fake-codex'), 'w') as f:
-            f.write('#!/bin/sh\necho "no such thread" >&2\nexit 1\n')
+        fake_script(os.path.join(self.dir.name, 'bin', 'fake_codex.py'), fail='no such thread')
         self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
         self.run_tool('watch', '--once')
         self.assertIn('could not be reached (no such thread)', self.body(self.calls(['issue', 'comment'])[-1]))
@@ -657,8 +710,7 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.as_codex('next', 'designer', '--as', 'cx')
         self.rollout('t1', T0)
-        with open(os.path.join(self.dir.name, 'bin', 'fake-open'), 'w') as f:
-            f.write('#!/bin/sh\nexit 1\n')
+        fake_script(os.path.join(self.dir.name, 'bin', 'fake_open.py'), fail='')
         self.data({REPO: {'open': [issue(7, 'Icon', ['design'])]}})
         self.run_tool('watch', '--once')
         state = self.state()
@@ -768,8 +820,12 @@ class TeamTest(Base):
         self.run_tool('team', 'both')
         self.assertIn('runs on its own now', self.as_codex('watch', '--max-minutes', '0.05', thread='d1').stdout)
         self.assertEqual(self.state()['dispatcher_thread'], 'd1')
-        self.assertIn('plan sent to the dispatcher', self.run_tool('watch', '--wake', '--once').stdout)
-        self.assertIn(f'queue --thread d1 --message agentq plan', self.faked('codex'))
+        for _ in range(100):  # the watcher it started sends the plan, then sleeps until its next poll
+            if 'Last: end your turn' in self.faked('codex') and self.state().get('watch', {}).get('pid'):
+                break
+            time.sleep(0.1)
+        AQ.kill_tree(self.state()['watch']['pid'])
+        self.assertEqual(self.faked('codex').count('queue --thread d1 --message agentq plan'), 1)
         self.assertIn(f'classify {REPO}#4', self.faked('codex'))
         self.assertIn('Last: end your turn – the watcher keeps running', self.faked('codex'))
         self.assertNotIn('plan sent', self.run_tool('watch', '--wake', '--once', now=T1).stdout)  # sent once
@@ -809,11 +865,7 @@ class TeamTest(Base):
         self.assertEqual(self.state()['holders'], {f'{REPO}#7': 'cx'})
 
     def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
-        from importlib.machinery import SourceFileLoader
-        import importlib.util
-        spec = importlib.util.spec_from_loader('agentq_tool', SourceFileLoader('agentq_tool', TOOL))
-        tool = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(tool)
+        tool = AQ
         base = {'holders': {'a#1': 'w1', 'a#2': 'w2'}, 'watch': {'beat': 1}}
         ours = {'holders': {'a#1': 'w1', 'a#5': 'w5'}, 'watch': {'beat': 2}}  # took #5, let go of #2
         disk = {'holders': {'a#1': 'w1', 'a#2': 'w2', 'a#9': 'w9'}, 'watch': {'beat': 1}, 'paused': {'why': 'stop'}}
@@ -893,9 +945,8 @@ class TeamTest(Base):
     def test_claude_and_codex_dispatchers_side_by_side(self):
         self.data({REPO: {'open': []}})
         self.assertIn('both work every role', self.run_tool('team', 'both').stdout)
-        import fcntl
         with open(self.config + '.state.json.watch.claude.lock', 'a') as lock:  # a Claude watcher runs
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            AQ.lock_file(lock)
             codex = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
                                    text=True, env={**self.env(), 'CODEX_THREAD_ID': 't1'})
             self.assertIn('no work', codex.stdout)
@@ -943,9 +994,8 @@ class TeamTest(Base):
         self.assertIn('no work yet – run it again', self.run_tool('watch', '--max-minutes', '0').stdout)
         with open(self.config + '.state.json') as f:
             self.assertEqual(json.load(f)['watch']['beat'], '2026-01-02T12:00:00Z')
-        import fcntl
         with open(self.config + '.state.json.watch.lock', 'a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            AQ.lock_file(lock)
             self.assertIn('already running', self.run_tool('watch').stdout)
         self.data(self.board())
         self.assertIn('the owner wrote', self.run_tool('watch', '--once', now=T0).stdout)
@@ -1014,7 +1064,7 @@ class TeamTest(Base):
         shot = os.path.join(self.dir.name, 'pic.png')
         with open(shot, 'wb') as f:
             f.write(b'\x89PNG fake')
-        img = f'<p><img src="file://{shot}" alt="x"></p>'
+        img = f'<p><img src="{pathlib.Path(shot).as_uri()}" alt="x"></p>'
         self.data({'api': {
             f'repos/{REPO}/issues/3': {'title': 'Banner', 'body': 'Make it  *bold*\nsee ![x](u)', 'body_html': img,
                                        'labels': [{'name': 'design'}], 'user': {'login': 'boss'}},
@@ -1036,7 +1086,8 @@ class TeamTest(Base):
         self.assertIn("the owner's order: do it to the end without asking whether to", out)
         files = [l for l in out.splitlines() if l.endswith('.png')]
         self.assertEqual(len(files), 2)
-        self.assertTrue(files[0].startswith(os.path.join(self.dir.name, 'home', '.cache', 'agentq', 'shots')))
+        self.assertTrue(os.path.realpath(files[0]).startswith(
+            os.path.realpath(os.path.join(self.dir.name, 'home', '.cache', 'agentq', 'shots'))))
         self.assertEqual(open(files[0], 'rb').read(), b'\x89PNG fake')
         repo_img = ('<img src="https://github.com/acme/shots/raw/main/s/a%20b.png">'
                     '<img src="https://raw.githubusercontent.com/acme/closed/main/x.png">')
@@ -1201,7 +1252,7 @@ class TeamTest(Base):
             json.dump(cfg, f)
         self.data({REPO: {'open': [], 'next': 60}})
         out = self.run_tool('health').stdout
-        self.assertIn(f"removed the worktree {trees['merged']}: its work is in main", out)
+        self.assertIn(f"removed the worktree {os.path.normpath(trees['merged'])}: its work is in main", out)
         self.assertFalse(os.path.exists(trees['merged']))
         for name in ('dirty', 'ahead', 'fresh', 'session'):
             self.assertTrue(os.path.exists(trees[name]), name)
@@ -1225,9 +1276,8 @@ class TeamTest(Base):
         self.data({REPO: {'open': [report]}})
         with open(self.config + '.state.json', 'w') as f:
             json.dump({'watch': {'beat': '2026-01-02T11:59:00Z'}}, f)
-        import fcntl
         with open(self.config + '.state.json.watch.lock', 'a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            AQ.lock_file(lock)
             self.assertIn('healthy', self.run_tool('health').stdout)
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '60', '-R', REPO])
 
@@ -1251,7 +1301,7 @@ class TeamTest(Base):
         self.assertIn('designer | design | programmer | - | - | - | - | no | local_d', out)
         disp = os.path.join(self.dir.name, 'disp')
         claude = open(os.path.join(disp, 'CLAUDE.md')).read()
-        self.assertIn(f'`{os.path.realpath(TOOL)} watch`', claude)
+        self.assertIn(f'`{AQ.self_command()} watch`', claude)
         self.assertNotIn('{{', claude)
         self.assertIn('Your own session id is `local_x`. Never send to it. Every session id in a plan', claude)
         old = claude.replace(claude[claude.index('<!-- agentq:session'):claude.index('You are')], '')
@@ -1273,7 +1323,7 @@ class TeamTest(Base):
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())
         agents = open(os.path.join(disp, 'AGENTS.md')).read()
-        self.assertIn(f'Run `{os.path.realpath(TOOL)} watch` once. It starts the watcher on its own', agents)
+        self.assertIn(f'Run `{AQ.self_command()} watch` once. It starts the watcher on its own', agents)
 
     def test_role_adds_the_ready_made_marketer_and_sets_the_dispatcher_session(self):
         self.data({REPO: {'labels': []}})
@@ -1363,6 +1413,28 @@ class LinkTest(Base):
 
 
 class InitTest(Base):
+    def test_a_config_pointer_stands_for_a_symlink(self):
+        pointer = os.path.join(self.dir.name, 'pointer.json')  # what init writes on Windows without symlink rights
+        with open(pointer, 'w') as f:
+            json.dump({'agentq_config': self.config}, f)
+        run = subprocess.run([sys.executable, TOOL, '--config', pointer, 'roles'], capture_output=True, text=True,
+                             env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('programmer', run.stdout)
+
+    def test_the_command_workers_run_works_in_every_shell(self):
+        import shlex
+        if not AQ.WINDOWS:
+            self.assertEqual(AQ.self_command(), shlex.quote(os.path.realpath(TOOL)))
+        was = (AQ.WINDOWS, AQ.SELF, sys.executable)
+        try:
+            AQ.WINDOWS, AQ.SELF = True, 'C:\\Users\\me\\Sites\\agent-team-playbook\\tools\\agentq'
+            sys.executable = 'C:\\Program Files\\Python313\\python.exe'
+            self.assertEqual(AQ.self_command(), '"C:/Program Files/Python313/python.exe" '
+                                                'C:/Users/me/Sites/agent-team-playbook/tools/agentq')
+        finally:
+            AQ.WINDOWS, AQ.SELF, sys.executable = was
+
     def test_init_installs_into_one_project_only(self):
         project = os.path.join(self.dir.name, 'proj')
         subprocess.run(['git', 'init', '-q', project], check=True)
@@ -1378,13 +1450,21 @@ class InitTest(Base):
             cfg = json.load(f)
         self.assertEqual((cfg['owner_accounts'], cfg['agent_account'], cfg['repos']), (['boss'], 'bot', ['acme/app']))
         self.assertEqual(os.path.realpath(os.path.join(project, '.agentq.json')), os.path.realpath(config))
+        self.assertIs(cfg.get('primary', True), True)
+        self.assertNotIn('live', cfg)  # the example's restart command is a placeholder, never a real one
+        second = os.path.join(self.dir.name, 'second.json')  # the same project from another computer
+        run = subprocess.run([sys.executable, TOOL, 'init', '--owner', 'boss', '--project', project, '--second',
+                              '--config', second], capture_output=True, text=True, env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        with open(second) as f:
+            self.assertIs(json.load(f)['primary'], False)
         self.assertEqual(os.path.realpath(os.path.join(project, '.claude', 'skills', 'agent-team')),
                          os.path.join(ROOT, 'skill', 'agent-team'))
         run = subprocess.run([sys.executable, TOOL, 'init', '--owner', 'boss', '--project', project, '--codex'],
                              capture_output=True, text=True, env=self.env())
         self.assertEqual(run.returncode, 0, run.stderr)
         agents = open(os.path.join(project, 'AGENTS.md')).read()
-        self.assertIn('skill/agent-team/SKILL.md', agents)
+        self.assertIn(os.path.join('skill', 'agent-team', 'SKILL.md'), agents)
         exclude = open(os.path.join(project, '.git', 'info', 'exclude')).read().splitlines()
         self.assertEqual(exclude.count('.agentq.json'), 1)
         self.assertEqual(exclude.count('.claude/skills/agent-team'), 1)

@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.1 – 2026-10-20
+- `agentq init --like <config>`: a second computer takes the first computer's team – owner, AI account, repos, labels, texts, roles, rules, links – in the team's language, without that computer's folders, sessions, test runs and running copy. Before it, `init --second` started from the example's English labels, and a team that works in another language had to be copied by hand.
+
 ## 0.3.0 – 2026-10-20 – the first audited baseline
 
 What agentq and the skill are, after four days of building them against a live team (0.1.0–0.2.84 below, one entry per fix):

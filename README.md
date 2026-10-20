@@ -61,7 +61,7 @@ Do this once per project. The team is never installed globally.
    - The session sorts your open issues, starts the checker and dispatcher sessions (you approve each once) and adds a daily health timer.
    - It asks **"Turn on the marketer?"**, then **"Add more roles?"**, and repeats until you say no.
 4. **Another project?** Repeat step 3 there. When two projects both have the team, the session asks whether they should share tasks (`agentq link`).
-5. **The same project from a second computer?** Install there too; the session asks whether the team already runs on another computer and then sets that one up with `agentq init --second`. The first computer keeps the shared jobs (sorting new issues, full test runs, batches, handing back answered tasks); the second one serves only its own sessions and Codex workers. Claims on GitHub keep the two from taking the same task.
+5. **The same project from a second computer?** Install there too; the session asks whether the team already runs on another computer and then sets that one up with `agentq init --second --like <a copy of the first computer's config>` (the team's labels, texts and roles, without the first computer's folders and sessions). The first computer keeps the shared jobs (sorting new issues, full test runs, batches, handing back answered tasks); the second one serves only its own sessions and Codex workers. Claims on GitHub keep the two from taking the same task.
 
 **Windows** works too: Python 3.10+, `gh` and Git for Windows (Claude Code needs its bash anyway). Run agentq as `python <package>\tools\agentq …`; it prints every command it gives the agents in a form Git Bash, PowerShell and cmd all run (keep the package and Python in paths without spaces for PowerShell). Without the right to make symlinks, `init` uses a folder junction for the skill and a small pointer file for `.agentq.json`. The hourly health check is a Task Scheduler task instead of launchd. If the Codex CLI is not on PATH, set `AGENTQ_CODEX` to it. The tests run on Linux and Windows in CI.
 
@@ -92,7 +92,7 @@ The commands agents use:
 | `live role "command {sha}" [--when checked]` · `live --off` | install, on the owner's word | which role restarts your running copy: after GO, or after every check even with red tests (none: nothing is restarted, e.g. it runs elsewhere) |
 | `tests per-task\|batched` | any session, on the owner's word | each task runs the whole suite, or the watcher runs it every N tasks (red wakes the checker) |
 | `scale role N` | any session, on the owner's word | how many sessions of a role work in parallel; missing ones to start, extra ones rest; 0 when Codex workers pull the role: they take all its tasks |
-| `init [--second]` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder; `--second`: the same project from another computer |
+| `init [--second] [--like <config>]` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder; `--second`: the same project from another computer, `--like`: copy the team from its config |
 | `team claude\|codex\|both` · `codex-workers [N] [--role R]` · `stats` | any session, on the owner's word | who works (Claude, Codex or both) · the Codex workers to create · who works better |
 | `queue` · `take N` · `defer N "text"` · `check [--fix]` | anyone | the queue and who works on what · take a task by hand · set a task aside · find inconsistent labels (and fix them) |
 

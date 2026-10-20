@@ -168,6 +168,8 @@ def main(argv=None):
     ini.add_argument('--repo', help='owner/name (default: from the git remote "origin")')
     ini.add_argument('--project', help='the project folder (default: here)')
     ini.add_argument('--codex', action='store_true', help='also point AGENTS.md at the skill (codex and other agents)')
+    ini.add_argument('--like', help="the first computer's config file: copy its team (labels, texts, roles), not its "
+                                    'folders or sessions')
     ini.add_argument('--second', action='store_true', help='the team already runs on another computer for this project: '
                                                          'this one serves only its own sessions and Codex workers')
     for name, parser in sub.choices.items():  # agents add `--as <role>` out of habit: accepted everywhere

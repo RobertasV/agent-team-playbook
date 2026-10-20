@@ -97,6 +97,27 @@ def link(target, at):
     return True
 
 
+MACHINE_KEYS = ('checkout', 'tests', 'live', 'team_group', 'state_file', 'app_sessions', 'transcripts', 'shots_dir')
+ROLE_MACHINE_KEYS = ('session', 'sessions', 'active', 'since', 'shots')
+
+
+def like_config(path):
+    """The team another computer's config describes – owner, AI account, labels, texts, roles, rules, links – without
+    what belongs to that computer: its folders, sessions, test runs and running copy."""
+    try:
+        with open(os.path.expanduser(path), encoding='utf-8') as f:
+            raw = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail(f'cannot read the other computer\'s config {path}: {e}')
+    if isinstance(raw, dict) and set(raw) == {POINTER}:
+        return like_config(raw[POINTER])
+    for key in MACHINE_KEYS:
+        raw.pop(key, None)
+    raw['dispatcher'] = {k: v for k, v in raw.get('dispatcher', {}).items() if k not in ('folder', 'session')}
+    raw['roles'] = [{k: v for k, v in role.items() if k not in ROLE_MACHINE_KEYS} for role in raw.get('roles', [])]
+    return raw
+
+
 def cmd_init(opts):
     """Install the team into one project: its own config, the skill link, both kept out of the project's git."""
     top = git(os.path.abspath(opts.project or '.'), 'rev-parse', '--show-toplevel').strip()
@@ -112,11 +133,16 @@ def cmd_init(opts):
         print(f'config exists: {path}')
     else:
         who = gh_json('api', 'user')
-        with open(os.path.join(PACKAGE, 'config.example.json'), encoding='utf-8') as f:
-            raw = json.load(f)
-        raw.update({'owner_accounts': opts.owner, 'agent_account': who.get('login') or '', 'repos': [repo],
+        if opts.like:  # the same team from another computer: its labels, texts and roles, this computer's folders
+            raw = like_config(opts.like)
+        else:
+            with open(os.path.join(PACKAGE, 'config.example.json'), encoding='utf-8') as f:
+                raw = json.load(f)
+        repos = raw.get('repos') if opts.like and repo in (raw.get('repos') or []) else [repo]
+        raw.update({'owner_accounts': opts.owner, 'agent_account': who.get('login') or '', 'repos': repos,
                     'checkout': top})
         raw.pop('live', None)  # the example's restart command is a placeholder: `agentq live` sets a real one
+        raw.setdefault('dispatcher', {})
         if opts.second:
             raw['primary'] = False
         raw['dispatcher']['folder'] = os.path.expanduser(f"~/agent-team/{repo.replace('/', '-')}-dispatcher")

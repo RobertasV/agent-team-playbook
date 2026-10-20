@@ -1489,6 +1489,35 @@ class InitTest(Base):
         self.assertEqual(run.returncode, 0, run.stderr)
         with open(second) as f:
             self.assertIs(json.load(f)['primary'], False)
+        first = os.path.join(self.dir.name, 'first.json')  # the first computer's team, in its own language
+        with open(first, 'w') as f:
+            json.dump({'owner_accounts': ['boss'], 'agent_account': 'bot', 'repos': ['acme/app', 'acme/site'],
+                       'checkout': '/Users/x/app', 'labels': {'working': 'taisau', 'question': 'reikia tavęs',
+                                                              'deferred': 'atidėta', 'waiting': 'laukia'},
+                       'texts': {'take': 'imu.'}, 'default_role': 'programuotojas', 'team_group': 'cg-1',
+                       'live': {'role': 'testuotojas', 'command': 'restart {sha}'}, 'codex_model': 'model-b',
+                       'tests': {'mode': 'batched', 'checkout': '/Users/x/tests'},
+                       'dispatcher': {'folder': '/Users/x/disp', 'session': 'local_d', 'agent': 'both'},
+                       'roles': [{'role': 'programuotojas', 'label': 'programuotojas', 'mode': 'programmer',
+                                  'description': 'viskas', 'agent': 'both', 'session': 'local_a',
+                                  'sessions': ['local_a', 'local_b'], 'active': 0, 'shots': ['/Users/x/a.png']}]}, f)
+        copy = os.path.join(self.dir.name, 'copy.json')
+        run = subprocess.run([sys.executable, TOOL, 'init', '--owner', 'boss', '--project', project, '--second',
+                              '--like', first, '--config', copy], capture_output=True, text=True, env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        with open(copy) as f:
+            made = json.load(f)
+        self.assertEqual(made['labels']['working'], 'taisau')
+        self.assertEqual((made['texts'], made['default_role'], made['codex_model']), ({'take': 'imu.'}, 'programuotojas',
+                                                                                       'model-b'))
+        self.assertEqual(made['roles'], [{'role': 'programuotojas', 'label': 'programuotojas', 'mode': 'programmer',
+                                          'description': 'viskas', 'agent': 'both'}])
+        self.assertEqual(made['repos'], ['acme/app', 'acme/site'])
+        self.assertTrue(made['dispatcher']['folder'].endswith('acme-app-dispatcher'))
+        self.assertNotIn('session', made['dispatcher'])
+        for key in ('live', 'tests', 'team_group'):
+            self.assertNotIn(key, made)
+        self.assertIs(made['primary'], False)
         self.assertEqual(os.path.realpath(os.path.join(project, '.claude', 'skills', 'agent-team')),
                          os.path.join(ROOT, 'skill', 'agent-team'))
         run = subprocess.run([sys.executable, TOOL, 'init', '--owner', 'boss', '--project', project, '--codex'],

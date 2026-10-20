@@ -518,6 +518,13 @@ class TeamTest(Base):
         deleted = [c for c in self.calls() if c[:3] == ['api', '-X', 'DELETE']]
         self.assertEqual(deleted, [['api', '-X', 'DELETE', f'repos/{REPO}/issues/comments/1001']])
         self.assertNotIn(['issue', 'edit', '8', '-R', REPO, '--add-label', 'doing'], self.calls(['issue', 'edit']))
+        back = {'id': 6, 'user': {'login': 'bot'}, 'body': '🤖 designer: → designer. not mine\n<!-- agentq:route -->',
+                'created_at': '2026-01-02T11:59:59Z'}  # pc2 handed #8 back: its claim is over
+        self.data({REPO: {'open': [issue(8, 'Logo', ['design', 'priority'])]},
+                   'api': {f'repos/{REPO}/issues/8/comments': [other, back],
+                           f'repos/{REPO}/issues/8': {'title': 'Logo', 'body': 'x', 'labels': [{'name': 'design'}],
+                                                       'user': {'login': 'boss'}}}})
+        self.assertIn(f'{REPO}#8 is yours now', self.run_tool('next', 'designer').stdout)
 
     def test_one_worker_pulls_for_every_pulling_role(self):
         self.data({REPO: {'labels': []}})

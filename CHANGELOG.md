@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.83 – 2026-10-20
+- The skill read through again: the scale paragraph no longer mixes in which team takes a task (its own section now), a resting worker is told to stop, Windows' command form, the team labels in setup, a project without a checker. `agentq handover --owner` for the owner's word that the other team does a task. The README lists every command.
+
 ## 0.2.82 – 2026-10-20
 - Three tries and a task still fails: the worker stops and runs `agentq handover N "what I tried"` – the task gets the other team's only-label (Claude ↔ Codex), its claim ends, and the other team takes it with the notes. Every brief says so. A Codex programmer spent four hours and eleven versions on one flaky-test task.
 - A task kept for Claude in a role with no working Claude session (`scale 0`) goes to a free resting session (`assign --session`), and the owner's words and reminders reach a Claude session that holds such a task.

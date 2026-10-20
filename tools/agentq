@@ -199,6 +199,7 @@ DEFAULT_TEXTS = {
     'queued': 'queued for {role}.',
     'route': '→ {role}. {text}',
     'handover': 'not done in {tries} tries – over to the {team} team. {text}',
+    'handover_owner': 'the owner keeps this for the {team} team – over to it. {text}',
     'done': '{text}',
     'batch_title': 'Check: {refs}',
     'batch_body': 'Finished tasks for {role} to check:\n{list}\n\nCommit: {commit}',
@@ -2259,7 +2260,8 @@ def cmd_handover(cfg, opts):
     team = here or ('codex' if labels['by_codex'] in names else 'claude')
     other = 'claude' if team == 'codex' else 'codex'
     role = role_of_labels(cfg, names) or default_role(cfg)
-    text = cfg['texts']['handover'].format(tries=opts.tries, team=other, text=opts.text).strip()
+    text = cfg['texts']['handover_owner' if opts.owner else 'handover'].format(tries=opts.tries, team=other,
+                                                                              text=opts.text).strip()
     comment(cfg, repo, number, f'{text}\n{ROUTE_MARK}', role['role'], team)  # the route mark ends this team's claim
     relabel(repo, number, add=[labels[f'only_{other}']],
             remove=[n for n in (labels['working'], labels[f'only_{team}']) if n in names])
@@ -3187,6 +3189,7 @@ def main(argv=None):
     ho.add_argument('issue')
     ho.add_argument('text', help='what you tried and where it stands')
     ho.add_argument('--tries', type=int, default=3)
+    ho.add_argument('--owner', action='store_true', help="not tries: the owner's word keeps it for the other team")
     r = sub.add_parser('route', help='not mine: give it to another role (records a lesson for the dispatcher)')
     r.add_argument('issue')
     r.add_argument('role')

@@ -81,7 +81,9 @@ The commands agents use:
 | `done N "text"` | role | fixed: comment, close |
 | `ask N "question"` | role | stuck: ask the owner; out of the queue until answered |
 | `route N role "why"` | role | not mine: hand it over and teach the dispatcher |
-| `wait N other/repo#M` | role | needs another project first; `check --fix` brings it back |
+| `wait N other/repo#M` | role | needs another project first; the watcher brings it back when that one closes |
+| `handover N "what I tried" [--owner]` | role | three tries failed (or the owner's word): the other team (Claude ↔ Codex) takes it |
+| `assign N role --only claude\|codex` · `--session <id>` | any session, on the owner's word | keep a task for one team · give it to a named Claude session, even a resting one |
 | `move N other/repo` · `split N other/repo "title" "text"` | dispatcher, role | sharing between linked projects |
 | `batch role` · `checked N` | dispatcher · checker | create a checker's batch · finish it (labels every task `checked: <role>`) |
 | `teach "topic → role" [--owner]` | anyone | a rule for the dispatcher |
@@ -90,7 +92,8 @@ The commands agents use:
 | `live role "command {sha}" [--when checked]` · `live --off` | install, on the owner's word | which role restarts your running copy: after GO, or after every check even with red tests (none: nothing is restarted, e.g. it runs elsewhere) |
 | `tests per-task\|batched` | any session, on the owner's word | each task runs the whole suite, or the watcher runs it every N tasks (red wakes the checker) |
 | `scale role N` | any session, on the owner's word | how many sessions of a role work in parallel; missing ones to start, extra ones rest; 0 when Codex workers pull the role: they take all its tasks |
-| `init` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder |
+| `init [--second]` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder; `--second`: the same project from another computer |
+| `team claude\|codex\|both` · `codex-workers [N] [--role R]` · `stats` | any session, on the owner's word | who works (Claude, Codex or both) · the Codex workers to create · who works better |
 | `queue` · `take` · `defer` · `check` | anyone | the 0.1 commands, still available |
 
 ## Configuration

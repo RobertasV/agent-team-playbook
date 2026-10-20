@@ -1,29 +1,19 @@
 """agentq against a fake `gh`: python3 -m unittest discover -s tests"""
 import datetime
-import importlib.util
-import pathlib
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from importlib.machinery import SourceFileLoader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TOOL = os.path.join(ROOT, 'tools', 'agentq')
 FAKE = os.path.join(ROOT, 'tests', 'fake_gh.py')
-
-
-def load_agentq():
-    spec = importlib.util.spec_from_loader('agentq_tool', SourceFileLoader('agentq_tool', TOOL))
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-AQ = load_agentq()  # its portable file lock, for tests that pretend another watcher runs
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+from agentq_lib import apps, state, system  # noqa: E402 – its file lock and helpers, for tests that look inside
 
 
 def fake_script(path, log=None, fail=None):
@@ -274,6 +264,24 @@ ICON = {f'repos/{REPO}/issues/7': {'title': 'Icon', 'body': 'a round icon', 'lab
 
 def closed(number, title, at, labels=(), reason='COMPLETED'):
     return issue(number, title, labels, closedAt=at, stateReason=reason)
+
+
+class AppsTest(unittest.TestCase):
+    """The desktop apps' files are theirs: a change in their shape means "cannot be seen", never a crash."""
+
+    def test_unexpected_app_files_are_read_as_unknown(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = {'app_sessions': os.path.join(d, 'app'), 'transcripts': os.path.join(d, 'tx'), 'state_file': os.path.join(d, 's.json')}
+            meta = os.path.join(d, 'app', 'a', 'b', 'local_s.json')
+            os.makedirs(os.path.dirname(meta))
+            for shape in ('[1, 2]', '{"cliSessionId": 7}', 'not json', '{"cliSessionId": "c", "lastActivityAt": "soon"}'):
+                with open(meta, 'w') as f:
+                    f.write(shape)
+                self.assertIsNone(apps.session_activity(cfg, 'local_s'), shape)
+                self.assertEqual(apps.worker_title(cfg, 'local_s'), 'local_s', shape)
+            os.makedirs(os.path.join(d, 'tx', 'p'))
+            open(os.path.join(d, 'tx', 'p', 'c.jsonl'), 'w').close()
+            self.assertIsNotNone(apps.session_activity(cfg, 'local_s'))  # its transcript is there: seen, bad time or not
 
 
 class TeamTest(Base):
@@ -847,7 +855,7 @@ class TeamTest(Base):
             if 'Last: end your turn' in self.faked('codex') and self.state().get('watch', {}).get('pid'):
                 break
             time.sleep(0.1)
-        AQ.kill_tree(self.state()['watch']['pid'])
+        system.kill_tree(self.state()['watch']['pid'])
         self.assertEqual(self.faked('codex').count('queue --thread d1 --message agentq plan'), 1)
         self.assertIn(f'classify {REPO}#4', self.faked('codex'))
         self.assertIn('Last: end your turn – the watcher keeps running', self.faked('codex'))
@@ -888,7 +896,7 @@ class TeamTest(Base):
         self.assertEqual(self.state()['holders'], {f'{REPO}#7': 'cx'})
 
     def test_saving_the_state_keeps_what_others_changed_meanwhile(self):
-        tool = AQ
+        tool = state
         base = {'holders': {'a#1': 'w1', 'a#2': 'w2'}, 'watch': {'beat': 1}}
         ours = {'holders': {'a#1': 'w1', 'a#5': 'w5'}, 'watch': {'beat': 2}}  # took #5, let go of #2
         disk = {'holders': {'a#1': 'w1', 'a#2': 'w2', 'a#9': 'w9'}, 'watch': {'beat': 1}, 'paused': {'why': 'stop'}}
@@ -969,7 +977,7 @@ class TeamTest(Base):
         self.data({REPO: {'open': []}})
         self.assertIn('both work every role', self.run_tool('team', 'both').stdout)
         with open(self.config + '.state.json.watch.claude.lock', 'a') as lock:  # a Claude watcher runs
-            AQ.lock_file(lock)
+            system.lock_file(lock)
             codex = subprocess.run([sys.executable, TOOL, '--config', self.config, 'watch', '--once'], capture_output=True,
                                    text=True, env={**self.env(), 'CODEX_THREAD_ID': 't1'})
             self.assertIn('no work', codex.stdout)
@@ -1018,7 +1026,7 @@ class TeamTest(Base):
         with open(self.config + '.state.json') as f:
             self.assertEqual(json.load(f)['watch']['beat'], '2026-01-02T12:00:00Z')
         with open(self.config + '.state.json.watch.lock', 'a') as lock:
-            AQ.lock_file(lock)
+            system.lock_file(lock)
             self.assertIn('already running', self.run_tool('watch').stdout)
         self.data(self.board())
         self.assertIn('the owner wrote', self.run_tool('watch', '--once', now=T0).stdout)
@@ -1300,7 +1308,7 @@ class TeamTest(Base):
         with open(self.config + '.state.json', 'w') as f:
             json.dump({'watch': {'beat': '2026-01-02T11:59:00Z'}}, f)
         with open(self.config + '.state.json.watch.lock', 'a') as lock:
-            AQ.lock_file(lock)
+            system.lock_file(lock)
             self.assertIn('healthy', self.run_tool('health').stdout)
         self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '60', '-R', REPO])
 
@@ -1324,7 +1332,7 @@ class TeamTest(Base):
         self.assertIn('designer | design | programmer | - | - | - | - | no | local_d', out)
         disp = os.path.join(self.dir.name, 'disp')
         claude = open(os.path.join(disp, 'CLAUDE.md')).read()
-        self.assertIn(f'`{AQ.self_command()} watch`', claude)
+        self.assertIn(f'`{system.self_command()} watch`', claude)
         self.assertNotIn('{{', claude)
         self.assertIn('Your own session id is `local_x`. Never send to it. Every session id in a plan', claude)
         old = claude.replace(claude[claude.index('<!-- agentq:session'):claude.index('You are')], '')
@@ -1346,7 +1354,7 @@ class TeamTest(Base):
         self.assertEqual(os.path.realpath(os.path.join(disp, '.agentq.json')), os.path.realpath(self.config))
         self.assertIn('## designer', open(os.path.join(disp, 'roles.md')).read())
         agents = open(os.path.join(disp, 'AGENTS.md')).read()
-        self.assertIn(f'Run `{AQ.self_command()} watch` once. It starts the watcher on its own', agents)
+        self.assertIn(f'Run `{system.self_command()} watch` once. It starts the watcher on its own', agents)
 
     def test_role_adds_the_ready_made_marketer_and_sets_the_dispatcher_session(self):
         self.data({REPO: {'labels': []}})
@@ -1432,7 +1440,7 @@ class LinkTest(Base):
         self.assertIn(f'{OTHER}#13 opened in the linked project', out)
         made = self.calls(['issue', 'create'])[-1]
         self.assertNotIn('--label', made)
-        self.assertIn(f'for the marketer role: texts and SEO', self.body(made))
+        self.assertIn('for the marketer role: texts and SEO', self.body(made))
 
 
 class InitTest(Base):
@@ -1447,16 +1455,16 @@ class InitTest(Base):
 
     def test_the_command_workers_run_works_in_every_shell(self):
         import shlex
-        if not AQ.WINDOWS:
-            self.assertEqual(AQ.self_command(), shlex.quote(os.path.realpath(TOOL)))
-        was = (AQ.WINDOWS, AQ.SELF, sys.executable)
+        if not system.WINDOWS:
+            self.assertEqual(system.self_command(), shlex.quote(os.path.realpath(TOOL)))
+        was = (system.WINDOWS, system.SELF, sys.executable)
         try:
-            AQ.WINDOWS, AQ.SELF = True, 'C:\\Users\\me\\Sites\\agent-team-playbook\\tools\\agentq'
+            system.WINDOWS, system.SELF = True, 'C:\\Users\\me\\Sites\\agent-team-playbook\\tools\\agentq'
             sys.executable = 'C:\\Program Files\\Python313\\python.exe'
-            self.assertEqual(AQ.self_command(), '"C:/Program Files/Python313/python.exe" '
+            self.assertEqual(system.self_command(), '"C:/Program Files/Python313/python.exe" '
                                                 'C:/Users/me/Sites/agent-team-playbook/tools/agentq')
         finally:
-            AQ.WINDOWS, AQ.SELF, sys.executable = was
+            system.WINDOWS, system.SELF, sys.executable = was
 
     def test_init_installs_into_one_project_only(self):
         project = os.path.join(self.dir.name, 'proj')

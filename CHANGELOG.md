@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 – 2026-10-20 – the first audited baseline
+
+What agentq and the skill are, after four days of building them against a live team (0.1.0–0.2.84 below, one entry per fix):
+
+- **The loop.** The owner writes GitHub issues. A watcher reads the board every minute without tokens and wakes the dispatcher only with a plan; the dispatcher sorts new issues to roles and sends or queues tasks. A worker takes a task (`agentq next` or a dispatcher's message), reads it (`brief`) and finishes it with exactly one command (`done`, `ask`, `route`, `handover`, `wait`, `move`, `split`) that changes comment and labels together.
+- **Two teams.** Every role can be worked by Claude sessions, Codex workers or both; they compete for tasks through claims on GitHub, take turns, and a task can be kept for one team. A Codex worker never waits in a command: the watcher claims its next task and wakes it with one queued message.
+- **Checks.** Per-task or batched tests; a checker role checks finished tasks in batches and opens linked tasks for what it finds; a release role owns release candidates; one role may restart the owner's running copy of the program.
+- **Health.** Stuck tasks are reminded and then reported, the owner's new words reach the worker holding the task, waiting tasks come back when what they wait for closes, old worktrees are removed, low disk is reported – in one issue per computer.
+- **Anywhere.** Per project, in the config's language, on macOS, Linux and Windows, from one or two computers.
+- **Code.** `tools/agentq` runs `tools/agentq_lib/` (one module per part, see docs/DESIGN.md "Code layout"); standard library only; 81 tests against a fake `gh` on macOS, Linux and Windows, plus pyflakes in CI. What it reads from the Claude and Codex apps, and what happens when that changes: docs/DESIGN.md "What agentq reads from the apps" – every such read now fails safe.
+- In this release: the code split into modules (every definition moved unchanged, checked against the old file's syntax tree); the Codex unlock on Windows imported its module (it would have failed there); app files of an unexpected shape, or vanishing while read, count as unknown instead of raising.
+
 ## 0.2.84 – 2026-10-20
 - The install steps and model settings moved from SKILL.md to INSTALL.md beside it: every session reads the skill, only an install needs the steps – the skill is about 40 % shorter.
 

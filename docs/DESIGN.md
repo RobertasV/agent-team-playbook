@@ -1,6 +1,6 @@
-# Agent team 0.2 – design
+# Agent team – design
 
-Agreed with the owner before building 0.2. This is the build spec; `skill/agent-team/SKILL.md` is the short version agents read. Scope: one project at a time, installed per project (never globally); projects may share tasks (below).
+Agreed with the owner while building 0.2 and 0.3. This is the build spec; `skill/agent-team/SKILL.md` is the short version agents read (`INSTALL.md` beside it for an install). Scope: one project at a time, installed per project (never globally); projects may share tasks (below).
 
 ## Team
 
@@ -73,7 +73,9 @@ Decided by the owner on 2026-10-18: Claude and Codex each have their own workers
 
 ## Many computers
 
-The owner asked for a universal skill that scales (2026-10-18): one dispatcher per project, workers anywhere. GitHub has no lock, so `next` and `assign` claim a task with a comment carrying a unique mark, read the comments back, and keep it only if theirs is the earliest claim of the last ten minutes; a loser deletes its claim and moves on. Per-computer state (who holds what, delivered words) stays local; the board is the shared truth.
+The owner asked for a universal skill that scales (2026-10-18): one dispatcher per project, workers anywhere. GitHub has no lock, so `next` and `assign` claim a task with a comment carrying a unique mark (`host/who/random`), read the comments back, and keep it only if theirs is the earliest claim of the last ten minutes; a loser deletes its claim and moves on. A claim made before a hand-back (`route`, `handover`) no longer counts. Per-computer state (who holds what, delivered words) stays local; the board is the shared truth.
+
+The same project from a second computer (2026-10-20, a Windows PC beside the Mac): its config has `"primary": false` (`agentq init --second`). Jobs that must happen once – sorting new issues, full test runs, checker batches, handing back answered or waiting tasks, PR checks, reporting others' stuck tasks – run only on the primary computer. A task in progress that no worker of this computer holds is looked up once: when its last claim names another host, this computer never reminds, releases or counts it. Each computer reports its own health in its own issue.
 
 ## Test modes
 
@@ -111,6 +113,45 @@ Re-running setup creates nothing that exists: it finds the sessions from the con
 3. **Worked.** The AI account downloads screenshots from a private repository: `gh api` with `Accept: application/vnd.github.full+json` returns the rendered HTML with short-lived signed image links that need no login.
 4. **Not verified.** Whether a session acts on a dispatcher message can only be seen with real sessions, which this build did not create. The skill tells sessions to act on it. Try one task end to end after setup.
 5. **Possible, with a condition.** `set_session_model` / `set_session_effort` switch another session from its next turn on. The app asks the owner first for a more expensive model, a higher effort or a session the caller did not start – except in bypass permission mode. So per-task switching (*hard*, release check) is silent only in bypass mode; otherwise the release check gets its own session.
+
+## Code layout
+
+`tools/agentq` is the one command every agent runs; the code is in `tools/agentq_lib/`, one module per part, each importing only from the modules listed before it (no cycles):
+
+| Module | Part |
+|---|---|
+| `system` | macOS / Linux / Windows differences (file locks, processes, paths), how agentq is run and restarted |
+| `base` | errors, time, text helpers, the marks agentq leaves in comments |
+| `defaults` | default labels, texts and roles (a config replaces any of them) |
+| `github` | `gh` (as the AI account) and `git`; comments, labels, claims |
+| `config` | finding, loading and saving a project's config; questions about its roles |
+| `state` | this computer's state: one writer at a time, merged saves, delivered words, waiting workers, the watcher lock |
+| `lessons` | routing lessons, rules and the dispatcher's `roles.md` |
+| `apps` | what is read from the Claude and Codex apps (below), messaging a Codex task |
+| `board` | which task a role takes next, who holds what, batches, tasks waiting for others |
+| `health` | the hourly check and its one issue |
+| `watch` | the watcher and the dispatcher's plan; waking Codex workers |
+| `brief` | a task as a worker reads it, screenshots as files |
+| `tasks` · `links` · `install` · `team` | the commands: a worker's, across linked projects, installing, the owner's words about the team |
+| `cli` | the command line |
+
+Standard library only. The tests (`tests/`) run every command against a fake `gh` on macOS, Linux and Windows (CI), plus pyflakes.
+
+## What agentq reads from the apps
+
+The Claude and Codex desktop apps have no API for most of what the team needs, so agentq reads some of their own files. They may change with any app update. Each read is of a file the app writes for itself; a missing file, one that vanishes while it is read, or an unexpected shape counts as "cannot be seen" and never stops agentq (`tests/test_agentq.py`, `AppsTest`).
+
+| What | Where (macOS; Windows) | Used for | When it cannot be read |
+|---|---|---|---|
+| Claude session records | `~/Library/Application Support/Claude/claude-code-sessions/*/*/<id>.json`; `%APPDATA%\Claude\…` | a session's project folder, its transcript id, last activity and title; whether an id exists | no transcript-based reminder (the dispatcher asks `get_session` instead); the id stands for the title |
+| Claude transcripts | `~/.claude/projects/*/<transcript id>.jsonl`, modification time only | when a session holding a task last did anything | as above |
+| Codex rollouts | `~/.codex/sessions/*/*/*/rollout-*-<thread>.jsonl`, modification time only | whether a Codex task still exists and when it last acted (wakes, reminders, `codex-workers`) | the worker counts as archived and gets no task; the board loses nothing |
+| Codex task locks | `~/.codex/thread-writer-locks/<thread>.lock` (`lsof`; on Windows a lock test) | whether the app has the task loaded, so a queued message runs | not loaded: after queuing, agentq opens `codex://threads/<id>` |
+| Codex task titles | `~/.codex/session_index.jsonl` | the worker's name in a take comment | the worker's own name |
+| Codex app running | the process list (`pgrep`; on Windows a CIM query, cached 30 s) | whether a queued message can run at all | not running: the task waits for a Claude worker or for Codex |
+| `codex queue` | the Codex CLI | one message that wakes a Codex worker | the wake is undone and the task goes back to the queue, with the reason in a comment |
+
+The dispatcher also uses the Claude app's session tools (`SendMessage`, `get_session`, `set_session_model`, `set_session_effort`, `clear_session`) because a plan names them; a step that fails is said in one line and the next one runs.
 
 ## Open
 

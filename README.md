@@ -38,8 +38,8 @@ Roles work in one of two modes. **Programmer mode** gets one task at a time. **C
 
 ## What you need
 
-- macOS or Linux with `git`, `python3` (standard library only) and [`gh`](https://cli.github.com).
-- The Claude desktop app (Code tab). Sessions message each other, and a finished background command wakes a session.
+- macOS, Linux or Windows with `git`, Python 3.10+ (standard library only) and [`gh`](https://cli.github.com).
+- The Claude desktop app (Code tab) and/or the Codex app. Claude sessions message each other and a finished background command wakes a session; Codex workers are woken by one queued message.
 - A separate GitHub account for the agents (the "AI account"). GitHub allows one free machine account per person. Invite it to your project with **Write** access, not Admin.
 
 ## Claude and Codex
@@ -94,7 +94,7 @@ The commands agents use:
 | `scale role N` | any session, on the owner's word | how many sessions of a role work in parallel; missing ones to start, extra ones rest; 0 when Codex workers pull the role: they take all its tasks |
 | `init [--second]` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder; `--second`: the same project from another computer |
 | `team claude\|codex\|both` · `codex-workers [N] [--role R]` · `stats` | any session, on the owner's word | who works (Claude, Codex or both) · the Codex workers to create · who works better |
-| `queue` · `take` · `defer` · `check` | anyone | the 0.1 commands, still available |
+| `queue` · `take N` · `defer N "text"` · `check [--fix]` | anyone | the queue and who works on what · take a task by hand · set a task aside · find inconsistent labels (and fix them) |
 
 ## Configuration
 

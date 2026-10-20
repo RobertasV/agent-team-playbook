@@ -14,10 +14,13 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: no undefined or unused names (pyflakes)
+        if: runner.os == 'Linux'
+        run: python -m pip install --quiet pyflakes && python -m pyflakes tools/agentq tools/agentq_lib tests
       - name: agentq against a fake gh
         # -X utf8: the test runner's own files; agentq itself runs without UTF-8 mode (the tests set PYTHONUTF8=0)
         run: python -X utf8 -I -m unittest discover -s tests -v

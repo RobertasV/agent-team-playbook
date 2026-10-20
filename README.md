@@ -55,7 +55,7 @@ Do this once per project. The team is never installed globally.
 3. **Open a Claude Code session in your project** and say:
    > Install the agent team from ~/Sites/agent-team-playbook in this project. My GitHub login is `<you>`.
 
-   The session reads [the skill](skill/agent-team/SKILL.md) and walks through the install steps with you:
+   The session reads [the skill](skill/agent-team/SKILL.md) and its [install steps](skill/agent-team/INSTALL.md) and walks through them with you:
    - `agentq init` creates this project's config in `~/.config/agentq/<owner>-<repo>.json`. It links `.agentq.json` and `.claude/skills/agent-team` into the project and keeps both out of git through `.git/info/exclude`.
    - `agentq setup` checks access, then creates the labels, the roles table and the dispatcher's folder (`~/agent-team/<owner>-<repo>-dispatcher`).
    - The session sorts your open issues, starts the checker and dispatcher sessions (you approve each once) and adds a daily health timer.

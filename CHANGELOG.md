@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.84 – 2026-10-20
+- The install steps and model settings moved from SKILL.md to INSTALL.md beside it: every session reads the skill, only an install needs the steps – the skill is about 40 % shorter.
+
 ## 0.2.83 – 2026-10-20
 - The skill read through again: the scale paragraph no longer mixes in which team takes a task (its own section now), a resting worker is told to stop, Windows' command form, the team labels in setup, a project without a checker. `agentq handover --owner` for the owner's word that the other team does a task. The README lists every command.
 

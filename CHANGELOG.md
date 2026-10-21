@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 – 2026-10-21
+- "Claude off" (`agentq team codex`) now rests every Claude session of the team: before, a Claude session in a role's sessions kept taking tasks itself, because only `scale` made it rest.
+- A watcher and a waiting worker (`agentq next --wait`) restart when their config changes, as they already did when agentq changed: `team`, `scale` and `role` reach a loop that read the config before (a Claude session waiting since before the change kept the old settings until it restarted).
+
 ## 0.3.2 – 2026-10-20
 - Moving an issue releases its old local holder after the transfer (or copy and close) succeeds. `next` also recovers a stale holder whose issue was moved or deleted: it takes the next task or stops normally when none waits. Other workers' claims stay intact; an unknown read, network failure or lost repository access keeps the claim.
 

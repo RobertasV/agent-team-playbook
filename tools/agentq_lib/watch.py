@@ -386,7 +386,7 @@ def cmd_watch(cfg, opts):
         print('agentq watch: already running – nothing to do.')
         return 0
     interval = cfg['poll_seconds'] if opts.interval is None else opts.interval
-    code = code_stamp()
+    code = code_stamp(cfg['_path'])
     parent = session_parent()
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     while True:
@@ -396,7 +396,7 @@ def cmd_watch(cfg, opts):
         if not opts.wake and parent_gone(parent):  # started with & or nohup: its end would wake nobody
             print('agentq watch: not started by the session (its parent is gone) – start it with run_in_background.')
             return 1
-        restart_if_updated(code, lock, detach=opts.wake)
+        restart_if_updated(code, lock, detach=opts.wake, watched=(cfg['_path'],))
         state = load_state(cfg)
         start = now()
         work = copy.deepcopy(state)

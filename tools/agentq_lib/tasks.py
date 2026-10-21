@@ -243,11 +243,12 @@ def cmd_next(cfg, opts):
     agent = 'claude' if worker in {x for r in roles for x in r['sessions']} or here == 'claude' else 'codex'
     ids = {worker, session} - {None}  # a Claude session is known by its id even when it runs under another name
 
-    def rests(role):  # a Claude worker outside the role's working sessions (`agentq scale`): no new tasks
-        return agent == 'claude' and (role.get('active') == 0 or (bool(role['sessions']) and not ids & set(role['pool'])))
+    def rests(role):  # a Claude worker while Claude is off (`agentq team codex`) or outside the role's working sessions
+        return agent == 'claude' and (role.get('agent') == 'codex' or role.get('active') == 0 or  # (`agentq scale`)
+                                      (bool(role['sessions']) and not ids & set(role['pool'])))
     resting = [r for r in roles if rests(r)]
     wait = opts.wait and here != 'codex'
-    code = code_stamp()
+    code = code_stamp(cfg['_path'])
     parent = session_parent()
     deadline = time.time() + 60 * opts.max_minutes if opts.max_minutes is not None else None
     try:
@@ -274,8 +275,10 @@ def cmd_next(cfg, opts):
                     del holders[ref]
                 if resting and len(resting) == len(roles):
                     save_state(cfg, state)
-                    print(f"{worker} rests now: it is not one of the {len(resting[0]['pool'])} Claude session(s) that "
-                          f"work as {resting[0]['role']} (agentq scale). No new tasks – stop this loop and end your turn.")
+                    why = (f"Codex works {resting[0]['role']} alone (agentq team codex)" if resting[0].get('agent') == 'codex'
+                           else f"it is not one of the {len(resting[0]['pool'])} Claude session(s) that work as "
+                                f"{resting[0]['role']} (agentq scale)")
+                    print(f'{worker} rests now: {why}. No new tasks – stop this loop and end your turn.')
                     return 1
                 turns = state.get('last_team', {})
                 # Claude took this role's last task and a Codex worker waits for one: this one is Codex's turn
@@ -301,7 +304,7 @@ def cmd_next(cfg, opts):
                 print(f"nothing yet – run `{again.replace(' --as', ' --wait --as', 1)}` again.")
                 return 0
             time.sleep(cfg['poll_seconds'])
-            restart_if_updated(code)
+            restart_if_updated(code, watched=(cfg['_path'],))
     finally:
         if wait:
             unmark_waiting(cfg, worker)

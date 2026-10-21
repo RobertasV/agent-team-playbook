@@ -28,9 +28,17 @@ SELF = os.path.join(os.path.dirname(LIB), 'agentq')  # the script every agent ru
 PACKAGE = os.path.dirname(os.path.dirname(LIB))  # the package: the skill, templates, config.example.json
 
 
-def code_stamp():
-    """When this agentq last changed: the script or any of its modules (a long-running loop restarts on a change)."""
-    return max(os.path.getmtime(p) for p in [SELF, *glob.glob(os.path.join(glob.escape(LIB), '*.py'))])
+def code_stamp(*watched):
+    """When this agentq last changed – the script or any of its modules – and the files a loop also watches, such as
+    its config (None for one it cannot read). A long-running loop restarts on a change, so `agentq team` or `scale`
+    reaches a watcher or a waiting worker that read the config before."""
+    stamps = [max(os.path.getmtime(p) for p in [SELF, *glob.glob(os.path.join(glob.escape(LIB), '*.py'))])]
+    for path in watched:
+        try:
+            stamps.append(os.path.getmtime(path))
+        except OSError:
+            stamps.append(None)
+    return tuple(stamps)
 
 
 def self_command():
@@ -166,11 +174,12 @@ def running_in():
     return None
 
 
-def restart_if_updated(code, lock=None, detach=False):
-    """agentq changed while this loop ran: carry on in the new version, without waking anyone. Windows has no exec:
-    the new version runs as a child that this process waits for (a detached one is started and left), after this
-    process let go of its lock."""
-    if code_stamp() == code:
+def restart_if_updated(code, lock=None, detach=False, watched=()):
+    """agentq or its config changed while this loop ran: carry on in the new version, without waking anyone. Windows
+    has no exec: the new version runs as a child that this process waits for (a detached one is started and left),
+    after this process let go of its lock. A watched file that cannot be read now (being replaced) waits."""
+    stamp = code_stamp(*watched)
+    if stamp == code or None in stamp:
         return
     sys.stdout.flush()
     args = [sys.executable, SELF, *sys.argv[1:]]

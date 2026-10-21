@@ -803,6 +803,29 @@ class TeamTest(Base):
         self.assertNotIn('send this line', self.run_tool('watch', '--once', now=T1).stdout)
         self.assertIn(f'Task {REPO}#8 for programmer is yours now (worker cx)', self.faked('codex'))
 
+    def test_claude_off_reaches_a_claude_session_already_waiting_for_a_task(self):
+        self.data({REPO: {'open': [], 'labels': []}})
+        with open(self.config) as f:
+            cfg = json.load(f)
+        with open(self.config, 'w') as f:
+            json.dump({**cfg, 'poll_seconds': 0.2}, f)
+        self.run_tool('team', 'both')
+        self.run_tool('role', 'programmer', '--sessions', 'local_p')
+        claude = {**self.env(), 'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_p', 'AGENTQ_PARENT': str(os.getpid())}
+        waiting = subprocess.Popen([sys.executable, TOOL, '--config', self.config, 'next', 'programmer', '--wait'],
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=claude)
+        try:
+            time.sleep(1.5)
+            self.assertIsNone(waiting.poll())  # no task: it waits
+            self.run_tool('team', 'codex')  # the owner: "Claude off" – it read the config before
+            out, _ = waiting.communicate(timeout=20)
+        finally:
+            system.kill_tree(waiting.pid) if waiting.poll() is None else None
+        self.assertEqual(waiting.returncode, 1, out)
+        self.assertIn('local_p rests now: Codex works programmer alone (agentq team codex)', out)
+        self.assertIn('rests now', self.run_tool('next', 'programmer', ok=False, env={'CLAUDECODE': '1',
+                                                 'CLAUDE_CODE_HOST_SESSION_ID': 'local_p'}).stdout)
+
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})
         self.run_tool('team', 'both')

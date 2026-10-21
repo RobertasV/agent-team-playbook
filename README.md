@@ -118,7 +118,7 @@ The dispatcher reads `roles.md` in its folder. agentq writes that file from the 
 
 ## Update
 
-Run `git pull` in the package folder. The links point into the package, so every project gets the new version at once. [CHANGELOG.md](CHANGELOG.md) says what changed.
+Run `git pull` in the package folder. The links point into the package, so every project gets the new version at once; a running watcher or waiting worker carries on in it by itself, and also picks up a changed config (`team`, `scale`). [CHANGELOG.md](CHANGELOG.md) says what changed.
 
 ## Tests
 

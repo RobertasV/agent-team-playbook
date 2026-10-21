@@ -176,6 +176,10 @@ def main(argv=None):
         if name not in ('next', 'open') and not any('--as' in a.option_strings for a in parser._actions):
             parser.add_argument('--as', dest='who', help=argparse.SUPPRESS)
     opts = p.parse_args(argv)
+    if getattr(opts, 'text', None) == '-':  # a longer text, laid out in Markdown, comes on stdin (a heredoc)
+        if hasattr(sys.stdin, 'reconfigure'):
+            sys.stdin.reconfigure(encoding='utf-8')
+        opts.text = sys.stdin.read().strip()
     if not opts.cmd:  # plain `agentq`: what it can do
         p.print_help()
         return 0

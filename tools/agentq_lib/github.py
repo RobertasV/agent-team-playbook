@@ -100,9 +100,16 @@ def view(repo, number):
         raise
 
 
+def signed(head, text):
+    """`🤖 <role>: text` – a text of more than one line (agentq's own markers aside) starts below the signature, so its
+    Markdown (lists, paragraphs) renders as the writer laid it out."""
+    visible = re.sub(r'\n?<!--.*?-->', '', text or '', flags=re.S).strip()
+    return f"🤖 {head}:{chr(10) * 2 if chr(10) in visible else ' '}{text}"
+
+
 def comment(cfg, repo, number, text, who=None, agent=None, name=None):
     agent = agent or running_in()
-    body = f"🤖 {who or cfg['role']}{' · ' + agent if agent else ''}{f' ({name})' if name else ''}: {text}"
+    body = signed(f"{who or cfg['role']}{' · ' + agent if agent else ''}{f' ({name})' if name else ''}", text)
     gh('issue', 'comment', str(number), '-R', repo, '--body', body)
 
 

@@ -3,7 +3,7 @@
 import re
 
 from .base import Fail, one_line
-from .github import comment, create_issue, gh, labels_of, relabel, resolve, view
+from .github import comment, create_issue, gh, labels_of, relabel, resolve, signed, view
 from .config import holder, role_by_name, role_of_labels, save_config
 from .lessons import load_lessons, save_lessons, write_roles
 from .state import update_state
@@ -52,12 +52,12 @@ def cmd_open(cfg, opts):
     repo = opts.repo or cfg['repos'][0]
     if repo not in cfg['repos']:
         linked(cfg, repo)
-        number = create_issue(repo, opts.title, f"🤖 {opts.who or cfg['role']} ({cfg['repos'][0]}), for the "
-                                                f"{opts.role} role: {opts.text}", [])
+        number = create_issue(repo, opts.title, signed(f"{opts.who or cfg['role']} ({cfg['repos'][0]}), for the "
+                                                       f"{opts.role} role", opts.text), [])
         print(f"{repo}#{number} opened in the linked project; its dispatcher gives it to {opts.role}")
         return
     role = role_by_name(cfg, opts.role)
-    number = create_issue(repo, opts.title, f"🤖 {opts.who or cfg['role']}: {opts.text}", [role['label']])
+    number = create_issue(repo, opts.title, signed(opts.who or cfg['role'], opts.text), [role['label']])
     print(f"{repo}#{number} opened for {role['role']}")
 
 
@@ -67,7 +67,7 @@ def cmd_split(cfg, opts):
     target = linked(cfg, opts.repo)
     ref = f'{repo}#{number}'
     who = holder(cfg, view(repo, number))
-    body = f"🤖 {who}: {opts.text}\n\n{cfg['texts']['split_from'].format(ref=ref)}"
+    body = f"{signed(who, opts.text)}\n\n{cfg['texts']['split_from'].format(ref=ref)}"
     new = create_issue(target, opts.title, body, [])
     comment(cfg, repo, number, cfg['texts']['split'].format(repo=target, other=f'{target}#{new}'), who)
     print(f'{target}#{new} created from {ref}; {ref} stays here')

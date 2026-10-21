@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.5 – 2026-10-21
+- Comments the owner can read on a phone: a text of more than one line starts below the `🤖 <role>:` signature, so its Markdown renders; any text argument may be `-` to read it from stdin (a heredoc); the skill and every brief say how to lay a comment out – the result or the question first, a numbered choice with the recommended option first, paths and commits last. A worker's question to the owner had come as one long paragraph.
+
 ## 0.3.4 – 2026-10-21
 - Every file agentq rewrites (state, board, delivered marks, lessons, config) is first written to a temporary file of its own process. A Claude and a Codex watcher of one project (dispatcher agent `both`) wrote the board through the same temporary file, so one moved the other's copy away and crashed.
 - Since 0.3.3, also: checker batches are pinned to published commits, and a batch checks that the commit closing each task is in it.

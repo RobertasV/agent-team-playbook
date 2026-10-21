@@ -87,7 +87,10 @@ DEFAULT_TEXTS = {
             'reads it. Skills that wait for the user\'s sign-off before working (brainstorming, design approval) do '
             'not apply to team tasks: the task is the sign-off. Three tries and it still fails (your fix does not pass '
             'its checks, or the same problem comes back)? Stop and hand it to the other team (Claude ↔ Codex) with '
-            'what you tried and where it stands: `agentq handover {ref} "…"`.'),
+            'what you tried and where it stands: `agentq handover {ref} "…"`. What you write goes to the owner, who '
+            'reads it on a phone: in the owner\'s language, the result or the question first, then short lines or a '
+            'numbered list (the recommended option first), paths and commits last; more than two sentences → the text '
+            'on stdin in Markdown, e.g. `agentq ask {ref} - <<\'EOF\'` … `EOF`.'),
     'after': ('Never message other sessions and never offer to take part of a task someone else holds: the board '
               'carries everything. Before you finish, delete what you made for this task outside the project – scratch '
               'copies, test checkouts, worktrees, build output – keeping only what the owner needs to see; never delete '

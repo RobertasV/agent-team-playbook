@@ -172,6 +172,15 @@ class AgentqTest(Base):
         self.assertIn(f'fixed  {REPO}#9: {OTHER}#4 closed', out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '9', '-R', REPO, '--remove-label', 'waits'])
 
+    def test_a_longer_text_comes_on_stdin_and_starts_below_the_signature(self):
+        text = 'Which way?\n\n1. **Read only** – recommended.\n2. Keep the old versions.'
+        run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'ask', '#7', '-'], input=text + '\n',
+                             capture_output=True, text=True, encoding='utf-8', env=self.env())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(self.body(self.calls(['issue', 'comment'])[-1]), f'🤖 programmer:\n\n{text}')
+        self.run_tool('wait', '#7', f'{OTHER}#4')  # agentq's own marker on a second line keeps a short text inline
+        self.assertTrue(self.body(self.calls(['issue', 'comment'])[-1]).startswith(f'🤖 programmer: waiting for {OTHER}#4.'))
+
     def test_the_watcher_puts_a_waiting_task_back_when_the_other_closes(self):
         text = f'🤖 programmer: waiting for {OTHER}#4.\n<!-- agentq:wait {OTHER}#4 -->'
         waiting = issue(9, 'Needs the site', ['prog', 'waits'], comments=[said('bot', text, '2026-01-02T10:00:00Z')])

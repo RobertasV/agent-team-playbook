@@ -66,6 +66,7 @@ Two lives, the tickets between them: Claude has its dispatcher and sessions, Cod
 
 - Write only through the AI account, never as the owner. Every comment starts `🤖 <role>:` (agentq does it).
 - Change states only with agentq: one command does comment and labels together.
+- Write for the owner, who reads on a phone: the owner's language, plain words, short. First what the owner needs – the result, or the question in one sentence – then short paragraphs or a list. A choice: numbered options, the recommended one first, one or two lines each. Paths, commits, test counts and file names last, and only those the owner may need. More than two sentences → the text on stdin, in Markdown: `agentq ask N - <<'EOF'` … `EOF` (PowerShell: pipe a here-string to `agentq ask N -`).
 
 ## Releases and tokens
 

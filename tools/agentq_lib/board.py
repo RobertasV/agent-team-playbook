@@ -9,8 +9,8 @@ import socket
 from .system import replace_file, temp_path
 from .base import CLAIM_MARK, Fail, FULL, iso, now, parse_time, WAIT_MARK
 from .github import board, claim, comment, create_issue, gh_json, gh_pages, git, labels_of, login_of, relabel, view
-from .config import agent_labels, capacity, checked_label, pushes, trusted
-from .apps import worker_title
+from .config import agent_labels, capacity, checked_label, pulls, pushes, trusted
+from .apps import codex_activity, worker_title
 
 
 def session_held(cfg, state, role, repo, issues):
@@ -69,6 +69,33 @@ def release_waits(cfg, state, repo, issues, start):
         comment(cfg, repo, issue['number'], cfg['texts']['back'].format(ref=f'{other}#{other_n}'))
         relabel(repo, issue['number'], remove=[cfg['labels']['waiting']])
         issue['labels'] = [l for l in issue['labels'] if l['name'] != cfg['labels']['waiting']]
+
+
+def takers(cfg, state, role):
+    """Who on this computer can take this role's next task: its working Claude sessions, and the Codex workers the
+    watcher can wake – idle, finished, or holding a task now. Not one whose Codex task is gone, nor one that never
+    reported back (a conversation of the owner's that once ran `agentq next` is never sent tasks)."""
+    found = list(role['pool']) if pushes(role) else []
+    if pulls(role):
+        host = socket.gethostname()
+        holding = set(state.get('holders', {}).values())
+        found += [w for w, i in state.get('codex', {}).items()
+                  if i.get('host') == host and role['role'] in i.get('roles', []) and i.get('thread')
+                  and (i.get('idle') or i.get('finished') or w in holding) and codex_activity(i['thread'])]
+    return found
+
+
+def waiting_work(cfg, state, repo, issues, role):
+    """What waits for this role: its open tasks nobody works, or a check batch that is ready – '' when nothing."""
+    skip = cfg['skip'] | {cfg['labels']['working']}
+    queued = [i['number'] for i in issues if role['label'] in labels_of(i) and not skip & set(labels_of(i))]
+    if queued:
+        return f"{len(queued)} task(s) ({', '.join(f'#{n}' for n in sorted(queued)[:5])}{' …' if len(queued) > 5 else ''})"
+    if role['mode'] == 'checker' and not busy_with(cfg, issues, role):
+        items = unchecked(cfg, state, repo, role, {})
+        if batch_ready(cfg, role, items[:20], now()):
+            return f'a check batch ({len(items)} finished tasks)'
+    return ''
 
 
 def busy_with(cfg, issues, role, but=None):

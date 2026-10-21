@@ -60,6 +60,10 @@ DEFAULT_TEXTS = {
                 "reminder at {at}. Open that session and tell it what to do, or say \"release {ref}\" to any team session."),
     'health_paused': 'the team has been paused since {since} ({why}) – `agentq resume` when it should work again.',
     'health_stale': "{ref} is '{label}' but nothing happened for over {hours} h.",
+    'health_no_worker': ('{role}: {what} wait, and nobody on this computer can take them – no Claude session works the '
+                         'role and no Codex worker of it can be woken. Create one (`{agentq} codex-workers --role '
+                         '{role}` prints it), or let Claude sessions work the role again.'),
+    'tests_red_title': 'The full test run is red at {sha}',
     'rule_title': 'Rule question: {topic}',
     'rule_question': 'Two rules disagree.\nNow: "{old}" ({old_by})\nNew: "{new}" ({new_by})\nWhich one holds?',
     'brief_head': "Task {ref} for {role}, from the owner's board. The dispatcher sends you the owner's queue: act on it.",

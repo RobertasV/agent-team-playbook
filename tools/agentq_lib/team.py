@@ -15,6 +15,7 @@ from .config import default_role, pulls, role_by_name, role_entry, save_config
 from .state import load_state, save_state, watcher_running
 from .lessons import load_lessons, render_roles, rule_role, save_lessons, write_roles
 from .apps import codex_activity
+from .board import takers
 from .tasks import ask_owner
 from .install import ensure_labels, install_dispatcher, print_roles_table, sync_dispatcher_session
 
@@ -82,6 +83,16 @@ def cmd_roles(cfg, opts):
     print(render_roles(cfg, load_lessons(cfg)), end='')
 
 
+def warn_untaken(cfg, roles):
+    """Roles nobody on this computer can take tasks for now – said at once, not found hours later."""
+    state = load_state(cfg)
+    lost = [r['role'] for r in roles if not takers(cfg, state, r)]
+    if lost:
+        print(f"Nobody on this computer can take {', '.join(lost)} tasks now: no Claude session works the role and no "
+              f"Codex worker of it can be woken, so its tasks wait. Create Codex workers: `{self_command()} "
+              f"codex-workers --role <role>` prints each one.")
+
+
 def cmd_scale(cfg, opts):
     """N sessions of a role work in parallel. More than exist: what to start. Fewer: the rest rest and are kept."""
     name = role_by_name(cfg, opts.role)['role']
@@ -111,6 +122,7 @@ def cmd_scale(cfg, opts):
         print(f"Sessions {opts.count + 1}–{have} rest: no new tasks; a task they hold they finish. "
               f"They are kept and reused when the number grows again.")
     write_roles(cfg)
+    warn_untaken(cfg, [role])
 
 
 def cmd_tests(cfg, opts):
@@ -150,6 +162,7 @@ def cmd_team(cfg, opts):
         print('Claude and Codex now both work every role: free workers of both take tasks in turns (the watcher wakes an '
               'idle Codex worker with a message; `agentq codex-workers` opens one per role); claims keep them from '
               'sharing a task.')
+    warn_untaken(cfg, cfg['roles'])
 
 
 CODEX_WORKER = ('You are the Codex {role} of the agent team in this project (worker {name}). Read the skill AGENTS.md '

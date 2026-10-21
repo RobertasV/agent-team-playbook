@@ -16,7 +16,7 @@ from .system import (
     session_parent, shell_script
 )
 from .base import CLAIM_MARK, Fail, iso, now, one_line, parse_time
-from .github import comment, create_issue, gh_json, labels_of, login_of, relabel, resolve, view
+from .github import comment, create_issue, gh_json, labels_of, login_of, relabel, resolve, signed, view
 from .config import capacity, default_role, pulls, pushes, role_of_labels, tests_role, trusted
 from .state import (
     comment_key, load_delivered, load_state, mark_delivered, save_state, update_state, waiting_workers, watch_lock
@@ -159,7 +159,11 @@ def check_tests(cfg, state, repo, start, plan):
             role = tests_role(cfg)
             line = cfg['texts']['tests_red'].format(sha=sha, green=ts.get('green') or 'none yet', log=log,
                                                     priority=cfg['labels']['priority'])
-            plan.append(('tests_red', sha, role, line, None, role['session']))
+            if pushes(role) and role['session'] and running_in() != 'codex':
+                plan.append(('tests_red', sha, role, line, None, role['session']))
+            else:  # no Claude session to wake: a task on the board, for whichever team works the role
+                create_issue(repo, cfg['texts']['tests_red_title'].format(sha=sha[:8]), signed('health', line),
+                             [role['label'], cfg['labels']['priority']])
         return
     ts.setdefault('since', iso(start))
     last = ts.get('counted')

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.6 – 2026-10-21
+- A role nobody can take is said at once: `agentq team` and `agentq scale` name the roles with no working Claude session and no Codex worker the watcher can wake, and the hourly health check reports such a role when its tasks or a check batch wait. A Codex worker that never reported back (the owner's own Codex conversation that once ran `agentq next`) does not count. After "Claude off" a project's checker had no Codex worker for five hours, and nothing said so.
+- A red full test run becomes a task for the checker role when no Claude session works it (Claude off, or a Codex dispatcher), instead of a message to a Claude session that should not spend tokens on it – or, from a Codex dispatcher, no word at all.
+
 ## 0.3.5 – 2026-10-21
 - Comments the owner can read on a phone: a text of more than one line starts below the `🤖 <role>:` signature, so its Markdown renders; any text argument may be `-` to read it from stdin (a heredoc); the skill and every brief say how to lay a comment out – the result or the question first, a numbered choice with the recommended option first, paths and commits last. A worker's question to the owner had come as one long paragraph.
 

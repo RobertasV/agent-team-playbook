@@ -7,10 +7,11 @@ import socket
 import subprocess
 import time
 
-from .system import WINDOWS
+from .system import self_command, WINDOWS
 from .base import now, parse_time
 from .github import board, comment, create_issue, gh, gh_json, labels_of, relabel, view
 from .state import load_state, save_state, watcher_running
+from .board import takers, waiting_work
 
 
 def sweep_worktrees(cfg):
@@ -91,10 +92,15 @@ def cmd_health(cfg, opts):
     if cfg['disk_min_gb'] and free < cfg['disk_min_gb']:
         problems.append(texts['health_disk'].format(free=f'{free:.0f}', limit=cfg['disk_min_gb']))
     for repo in cfg['repos'] if cfg['primary'] else []:  # the whole board: the main computer's report
-        for issue in board(repo):
+        issues = board(repo)
+        for issue in issues:
             if cfg['labels']['working'] in labels_of(issue) and moment - parse_time(issue['updatedAt']) > stale:
                 problems.append(texts['health_stale'].format(ref=f"{repo}#{issue['number']}",
                                                              label=cfg['labels']['working'], hours=cfg['stale_hours']))
+        for role in cfg['roles']:  # work waits and nobody can take it: Claude off and no Codex worker of the role
+            what = '' if takers(cfg, state, role) else waiting_work(cfg, state, repo, issues, role)
+            if what:
+                problems.append(texts['health_no_worker'].format(role=role['role'], what=what, agentq=self_command()))
     report_health(cfg, state, problems)
     save_state(cfg, state)
     for path in sweep_worktrees(cfg):

@@ -818,7 +818,9 @@ class TeamTest(Base):
         self.assertIn('nothing yet', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)  # Codex's turn
         self.state(lambda s: s.__setitem__('last_team', {'programmer': 'codex'}))
         self.assertIn(f'{REPO}#7 is yours now (local_p)', self.run_tool('next', 'programmer', '--as', 'local_p').stdout)
-        self.assertIn('no Claude session works', self.run_tool('scale', 'programmer', '0').stdout)  # Codex only
+        scaled = self.run_tool('scale', 'programmer', '0').stdout  # Codex only: cx, idle, takes its tasks
+        self.assertIn('no Claude session works', scaled)
+        self.assertNotIn('Nobody on this computer can take', scaled)
         self.data({REPO: {'open': [issue(8, 'Menu', ['prog'])]}})
         self.assertIn('local_p rests now', self.run_tool('next', 'programmer', '--as', 'local_p', ok=False).stdout)
         claude = {'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_z'}  # under a name, not its session id
@@ -848,6 +850,37 @@ class TeamTest(Base):
         self.assertIn('local_p rests now: Codex works programmer alone (agentq team codex)', out)
         self.assertIn('rests now', self.run_tool('next', 'programmer', ok=False, env={'CLAUDECODE': '1',
                                                  'CLAUDE_CODE_HOST_SESSION_ID': 'local_p'}).stdout)
+
+    def test_claude_off_names_the_roles_nobody_can_take_and_health_reports_their_waiting_work(self):
+        self.data({REPO: {'open': [issue(7, 'Icon', ['design'])], 'labels': [], 'next': 60}})
+        out = self.run_tool('team', 'codex').stdout  # no Codex worker yet
+        self.assertIn('Nobody on this computer can take programmer, designer, checker tasks now', out)
+        self.as_codex('next', 'programmer', '--as', 'cx')  # a Codex programmer joins and goes idle
+        self.rollout('t1', T0)
+        self.assertIn('take designer, checker tasks', self.run_tool('team', 'codex').stdout)
+        health = self.run_tool('health').stdout
+        self.assertIn('designer: 1 task(s) (#7) wait, and nobody on this computer can take them', health)
+        self.assertNotIn('programmer: ', health)
+
+    def test_a_red_full_run_becomes_a_task_when_no_claude_session_works_the_checker(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        cfg['tests'] = {'mode': 'batched', 'full': 'true', 'every': 2, 'checkout': self.dir.name}
+        with open(self.config, 'w') as f:
+            json.dump(cfg, f)
+        base = self.config + '.state.json.tests'
+        for ext, text in (('code', '1'), ('sha', 'abc123456789')):
+            with open(f'{base}.r1.{ext}', 'w') as f:
+                f.write(text)
+        self.state(lambda s: s.__setitem__('tests', {'running': {'id': 'r1', 'pid': 0, 'at': T0}, 'green': 'aaa'}))
+        self.data({REPO: {'open': [], 'labels': []}})
+        self.run_tool('role', 'checker', '--agent', 'codex')  # Claude off for the checker
+        out = self.run_tool('watch', '--once', now=T1).stdout
+        self.assertNotIn('send this line to session local_c', out)
+        made = self.calls(['issue', 'create'])[-1]
+        self.assertEqual(made[made.index('--title') + 1], 'The full test run is red at abc12345')
+        self.assertIn('the full test run is red at abc123456789', self.body(made).lower())
+        self.assertEqual([made[i + 1] for i, a in enumerate(made) if a == '--label'], ['check', 'priority'])
 
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})

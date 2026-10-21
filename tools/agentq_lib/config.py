@@ -5,7 +5,7 @@ import glob
 import json
 import os
 
-from .system import APP_SESSIONS_DEFAULT, replace_file
+from .system import APP_SESSIONS_DEFAULT, replace_file, temp_path
 from .base import DEFAULT_CONFIG, Fail, PROJECT_CONFIG
 from .defaults import DEFAULT_LABELS, DEFAULT_ROLES, DEFAULT_TEXTS, MODES
 from .github import labels_of, login_of
@@ -120,7 +120,7 @@ def save_config(cfg, change):
     """Change the raw config (as written by the owner), write it back, return the reloaded config."""
     raw = copy.deepcopy(cfg['_raw'])
     change(raw)
-    tmp = cfg['_path'] + '.tmp'
+    tmp = temp_path(cfg['_path'])
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(raw, f, indent=2, ensure_ascii=False)
         f.write('\n')

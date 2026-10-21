@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4 – 2026-10-21
+- Every file agentq rewrites (state, board, delivered marks, lessons, config) is first written to a temporary file of its own process. A Claude and a Codex watcher of one project (dispatcher agent `both`) wrote the board through the same temporary file, so one moved the other's copy away and crashed.
+- Since 0.3.3, also: checker batches are pinned to published commits, and a batch checks that the commit closing each task is in it.
+
 ## 0.3.3 – 2026-10-21
 - "Claude off" (`agentq team codex`) now rests every Claude session of the team: before, a Claude session in a role's sessions kept taking tasks itself, because only `scale` made it rest.
 - A watcher and a waiting worker (`agentq next --wait`) restart when their config changes, as they already did when agentq changed: `team`, `scale` and `role` reach a loop that read the config before (a Claude session waiting since before the change kept the old settings until it restarted).

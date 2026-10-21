@@ -6,7 +6,7 @@ import json
 import re
 import socket
 
-from .system import replace_file
+from .system import replace_file, temp_path
 from .base import CLAIM_MARK, Fail, FULL, iso, now, parse_time, WAIT_MARK
 from .github import board, claim, comment, create_issue, gh_json, gh_pages, git, labels_of, login_of, relabel, view
 from .config import agent_labels, capacity, checked_label, pushes, trusted
@@ -206,7 +206,7 @@ def shared_board(cfg, state, repo):
 
 
 def save_board(cfg, boards):
-    tmp = cfg['state_file'] + '.board.json.tmp'
+    tmp = temp_path(cfg['state_file'] + '.board.json')
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(boards, f)
     replace_file(tmp, cfg['state_file'] + '.board.json')

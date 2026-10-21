@@ -4,7 +4,7 @@ import json
 import os
 import re
 
-from .system import replace_file
+from .system import replace_file, temp_path
 from .base import Fail
 
 
@@ -55,7 +55,7 @@ def render_roles(cfg, lessons):
 
 def save_lessons(cfg, lessons):
     os.makedirs(cfg['team_dir'], exist_ok=True)
-    tmp = lessons_path(cfg) + '.tmp'
+    tmp = temp_path(lessons_path(cfg))
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(lessons, f, indent=2, ensure_ascii=False)
     replace_file(tmp, lessons_path(cfg))

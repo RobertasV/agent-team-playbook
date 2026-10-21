@@ -266,6 +266,20 @@ def closed(number, title, at, labels=(), reason='COMPLETED'):
     return issue(number, title, labels, closedAt=at, stateReason=reason)
 
 
+class WriteTest(unittest.TestCase):
+    def test_two_processes_writing_the_board_at_once_never_take_each_others_copy(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:  # a Claude and a Codex watcher, side by side
+            code = ('import sys; sys.path.insert(0, sys.argv[1]); from agentq_lib.board import save_board\n'
+                    'for n in range(300): save_board({"state_file": sys.argv[2]}, {"n": n})')
+            writers = [subprocess.Popen([sys.executable, '-c', code, os.path.join(ROOT, 'tools'),
+                                         os.path.join(d, 'state.json')], stderr=subprocess.PIPE, text=True)
+                       for _ in range(2)]
+            for w in writers:
+                _, err = w.communicate(timeout=60)
+                self.assertEqual(w.returncode, 0, err)
+            self.assertEqual(sorted(os.listdir(d)), ['state.json.board.json'])
+
+
 class AppsTest(unittest.TestCase):
     """The desktop apps' files are theirs: a change in their shape means "cannot be seen", never a crash."""
 

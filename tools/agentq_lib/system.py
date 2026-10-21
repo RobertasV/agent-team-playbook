@@ -88,6 +88,12 @@ def unlock_file(handle):
     handle.close()
 
 
+def temp_path(path):
+    """A file to write before replacing `path`, this process's own: two processes writing the same file (a Claude and
+    a Codex watcher, a worker and the watcher) never move each other's half-written copy away."""
+    return f'{path}.{os.getpid()}.tmp'
+
+
 def replace_file(tmp, path):
     """os.replace; on Windows a reader holding the file open makes it fail for a moment, so try again."""
     for attempt in range(50):

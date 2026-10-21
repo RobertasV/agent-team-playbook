@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from .system import lock_file, replace_file, unlock_file
+from .system import lock_file, replace_file, temp_path, unlock_file
 from .base import now, parse_time
 from .github import login_of
 
@@ -39,7 +39,7 @@ def read_state_file(cfg):
 
 
 def write_state_file(cfg, data):
-    tmp = cfg['state_file'] + '.tmp'
+    tmp = temp_path(cfg['state_file'])
     with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
     replace_file(tmp, cfg['state_file'])
@@ -111,7 +111,7 @@ def mark_delivered(cfg, repo, comments, keep_hours):
             marks[comment_key(c)] = c.get('createdAt') or c.get('created_at')
         oldest = now() - dt.timedelta(hours=2 * keep_hours)
         data[repo] = {k: at for k, at in marks.items() if parse_time(at) >= oldest}
-        tmp = delivered_path(cfg) + '.tmp'
+        tmp = temp_path(delivered_path(cfg))
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=1)
         replace_file(tmp, delivered_path(cfg))

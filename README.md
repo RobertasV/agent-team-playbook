@@ -34,7 +34,7 @@ owner ──writes──▶ GitHub issues ◀──polls every minute, no tokens
              └── finish with one command: done · ask · route · wait · move · split · checked
 ```
 
-Roles work in one of two modes. **Programmer mode** gets one task at a time. **Checker mode** gets a batch issue (`Check: #a #b #c`, at a pinned commit) once N tasks are finished or the oldest has waited 24 h. Optionally, a checker-mode role only counts tasks whose commits touched given paths. The full design is in [docs/DESIGN.md](docs/DESIGN.md).
+Roles work in one of two modes. **Programmer mode** gets one task at a time. **Checker mode** gets a batch issue (`Check: #a #b #c`, at a pinned commit) once N tasks are finished or the oldest has waited 24 h. With a configured checkout, a batch fetches the published default-branch commit by SHA and verifies that GitHub's closing commits for its tasks are ancestors before creating the issue. Fetch/API errors or missing commits stop creation; it never falls back to the local HEAD. The batch marker records the pinned SHA and verified closing commits. Manually closed or non-code tasks may have no closing commit; their inclusion does not certify an implementation or a deployment. The checkout's branch and working files stay untouched. Optionally, a checker-mode role only counts tasks whose commits touched given paths. The full design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## What you need
 

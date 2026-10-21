@@ -1224,7 +1224,8 @@ class TeamTest(Base):
         cfg['roles'].append({'role': 'reviewer', 'mode': 'checker', 'n': 1, 'paths': ['rules/'], 'since': '2026-01-01T00:00:00Z'})
         with open(self.config, 'w') as f:
             json.dump(cfg, f)
-        self.data({**self.board(next=50)})
+        subprocess.run(['git', '-C', project, 'remote', 'add', 'origin', project], check=True)
+        self.data({**self.board(next=50), 'api': {f'repos/{REPO}/commits/HEAD': {'sha': head}}})
         out = self.run_tool('batch', 'reviewer').stdout
         self.assertIn(f'{REPO}#50 created: reviewer checks #10.', out)
         made = self.calls(['issue', 'create'])[-1]
@@ -1248,6 +1249,78 @@ class TeamTest(Base):
         made = len(self.calls(['issue', 'create']))  # it made its own batch since the plan said one was ready
         self.assertIn(f'nothing to do: checker is already on {REPO}#51', self.run_tool('batch', 'checker').stdout)
         self.assertEqual(len(self.calls(['issue', 'create'])), made)
+
+    def batch_checkout(self):
+        origin = os.path.join(self.dir.name, 'origin')
+        checkout = os.path.join(self.dir.name, 'checkout')
+
+        def git(folder, *args):
+            return subprocess.run(['git', '-C', folder, '-c', 'user.name=t', '-c', 'user.email=t@t', *args],
+                                  check=True, capture_output=True, text=True).stdout.strip()
+        os.makedirs(origin)
+        git(origin, 'init', '-q', '-b', 'main')
+        git(origin, 'commit', '-qm', 'initial', '--allow-empty')
+        git(origin, 'clone', '-q', origin, checkout)
+        old = git(checkout, 'rev-parse', 'HEAD')
+        git(checkout, 'switch', '-qc', 'unrelated-local-branch')
+        pathlib.Path(checkout, 'owner.txt').write_text('keep this uncommitted file', encoding='utf-8')
+        git(origin, 'commit', '-qm', 'Fixes #10', '--allow-empty')
+        source = git(origin, 'rev-parse', 'HEAD')
+        cfg = json.loads(pathlib.Path(self.config).read_text())
+        cfg['checkout'] = checkout
+        pathlib.Path(self.config).write_text(json.dumps(cfg))
+        fixture = {**self.board(next=50), 'api': {
+            f'repos/{REPO}/commits/HEAD': {'sha': source},
+            f'repos/{REPO}/issues/10/events?per_page=100': [{'event': 'closed', 'commit_id': source}],
+            f'repos/{REPO}/issues/11/events?per_page=100': [{'event': 'closed', 'commit_id': None}],
+        }}
+        self.data(fixture)
+        return git, checkout, old, source, fixture
+
+    def test_batch_fetches_published_commit_without_changing_stale_checkout(self):
+        git, checkout, old, source, fixture = self.batch_checkout()
+        self.run_tool('batch', 'checker')
+        body = self.body(self.calls(['issue', 'create'])[-1])
+        self.assertIn(f'Commit: {source}', body)
+        self.assertIn(f'"closing_commits": {{"10": "{source}"}}', body)
+        self.assertEqual(git(checkout, 'rev-parse', 'HEAD'), old)
+        self.assertEqual(git(checkout, 'branch', '--show-current'), 'unrelated-local-branch')
+        self.assertEqual(pathlib.Path(checkout, 'owner.txt').read_text(), 'keep this uncommitted file')
+        self.assertEqual(git(checkout, 'status', '--porcelain'), '?? owner.txt')
+
+    def test_batch_rejects_closing_commit_outside_published_history(self):
+        git, checkout, old, source, fixture = self.batch_checkout()
+        git(checkout, 'commit', '-qm', 'unpublished Fixes #10', '--allow-empty')
+        missing = git(checkout, 'rev-parse', 'HEAD')
+        fixture['api'][f'repos/{REPO}/issues/10/events?per_page=100'][0]['commit_id'] = missing
+        self.data(fixture)
+        run = self.run_tool('batch', 'checker', ok=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('not a verified ancestor', run.stderr)
+        self.assertIn(missing, run.stderr)
+        self.assertEqual(self.calls(['issue', 'create']), [])
+
+    def test_batch_does_not_fall_back_to_head_when_fetch_fails(self):
+        git, checkout, old, source, fixture = self.batch_checkout()
+        git(checkout, 'remote', 'set-url', 'origin', os.path.join(self.dir.name, 'missing-origin'))
+        run = self.run_tool('batch', 'checker', ok=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('git fetch', run.stderr)
+        self.assertEqual(self.calls(['issue', 'create']), [])
+
+    def test_batch_rejects_missing_remote_sha_and_reopened_task(self):
+        git, checkout, old, source, fixture = self.batch_checkout()
+        fixture['api'][f'repos/{REPO}/commits/HEAD'] = {}
+        self.data(fixture)
+        run = self.run_tool('batch', 'checker', ok=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('cannot pin', run.stderr)
+        fixture['api'][f'repos/{REPO}/issues/10/events?per_page=100'].append({'event': 'reopened'})
+        self.data(fixture)
+        run = self.run_tool('batch', 'checker', ok=False)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('reopened', run.stderr)
+        self.assertEqual(self.calls(['issue', 'create']), [])
 
     def test_open_creates_a_task_for_a_role(self):
         self.data({REPO: {'next': 77}})

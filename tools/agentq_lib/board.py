@@ -254,16 +254,50 @@ def take_next(cfg, state, repo, issues, roles, worker, agent, skip=()):
     return None, None
 
 
+def batch_source(cfg, repo, items):
+    """Pin the repository's published default branch, then verify GitHub's closing commits.
+
+    Fetch by immutable SHA: neither a stale checkout nor a different current branch
+    can select the batch version. No checkout files or local branches are changed.
+    """
+    checkout = cfg.get('checkout')
+    if not checkout:
+        return 'not pinned (no checkout in the config)', {}
+    closing = {}
+    for item in items:
+        events = gh_pages('api', f"repos/{repo}/issues/{item['number']}/events?per_page=100", '--paginate')
+        transitions = [e for e in events if e.get('event') in ('closed', 'reopened')]
+        last = transitions[-1] if transitions else {}
+        if last.get('event') == 'reopened':
+            raise Fail(f"{repo}#{item['number']} reopened before the batch was created")
+        if last.get('commit_id'):
+            closing[str(item['number'])] = last['commit_id']
+    source = gh_json('api', f'repos/{repo}/commits/HEAD').get('sha', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', source):
+        raise Fail(f'cannot pin the published default branch of {repo}')
+    git(checkout, 'fetch', '--no-tags', 'origin', source)
+    for number, commit in closing.items():
+        if not re.fullmatch(r'[0-9a-f]{40}', commit):
+            raise Fail(f'{repo}#{number} has an invalid closing commit')
+        try:
+            git(checkout, 'merge-base', '--is-ancestor', commit, source)
+        except Fail as error:
+            raise Fail(f'cannot create batch: closing commit {commit} for {repo}#{number} '
+                       f'is not a verified ancestor of {source}; publish the work first') from error
+    return source, closing
+
+
 def create_batch(cfg, state, repo, role, items, extra=()):
     refs = ' '.join(f"#{i['number']}" for i in items)
-    commit = git(cfg['checkout'], 'rev-parse', 'HEAD').strip() if cfg.get('checkout') else 'not pinned (no checkout in the config)'
+    commit, closing = batch_source(cfg, repo, items)
     body = cfg['texts']['batch_body'].format(role=role['role'], commit=commit,
                                              list='\n'.join(f"- #{i['number']} {i['title']}" for i in items))
     if cfg['tests']['mode'] == 'batched':
         last = state.get('tests', {}).get('last')
         result = f"{'green' if last['ok'] else 'red'} at {last['sha']}" if last else 'not run yet'
         body += '\n' + cfg['texts']['tests_line'].format(result=result)
-    mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items]})
+    mark = json.dumps({'role': role['role'], 'issues': [i['number'] for i in items],
+                       'commit': commit, 'closing_commits': closing})
     number = create_issue(repo, cfg['texts']['batch_title'].format(refs=refs), f'{body}\n\n<!-- agentq:batch {mark} -->',
                           [role['label'], cfg['labels']['batch'], cfg['labels']['working'], *extra])
     return f'{repo}#{number}'

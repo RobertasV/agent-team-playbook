@@ -96,7 +96,8 @@ def cmd_brief(cfg, opts):
         if cfg['links'] and not batch:
             out.append(texts['finish_links'].format(ref=ref))
         if not batch and role['mode'] == 'programmer':
-            out.append(texts['tests_batched' if cfg['tests']['mode'] == 'batched' else 'tests_per_task']
+            mode = cfg['tests']['mode']
+            out.append(texts['tests_batched' if mode == 'batched' else 'tests_off' if mode == 'off' else 'tests_per_task']
                        .format(every=cfg['tests']['every']))
         live = cfg.get('live') or {}
         if live.get('command'):  # the owner's running copy: one role restarts it, nobody else

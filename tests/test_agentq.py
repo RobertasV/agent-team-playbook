@@ -565,6 +565,13 @@ class TeamTest(Base):
         self.data({'api': {f'repos/{REPO}/issues/5': {'title': 'Bug', 'body': 'x', 'labels': [{'name': 'prog'}],
                                                        'user': {'login': 'boss'}}}})
         self.assertIn('The full suite runs on its own every 2 tasks.', self.run_tool('brief', '5').stdout)
+        self.run_tool('tests', 'off')  # the owner: no tests, a quick read only
+        brief = self.run_tool('brief', '5').stdout
+        self.assertIn('Tests: none now', brief)
+        self.assertNotIn('The full suite runs on its own', brief)
+        finished(14, 15, at='2026-01-02T12:20:00Z')
+        self.run_tool('watch', '--once', now='2026-01-02T12:26:00Z')
+        self.assertNotIn('running', self.state().get('tests', {}))  # no full runs either
 
     def test_a_codex_role_pulls_its_own_tasks(self):
         self.data({REPO: {'labels': []}})

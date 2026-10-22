@@ -50,6 +50,9 @@ DEFAULT_TEXTS = {
     'stale_pr_body': ('{url} "{title}" has not moved since {updated}. Finish it (merge when it is right), or close it with a '
                       'comment saying what replaced it. Then close this issue.'),
     'tests_per_task': 'Tests: run the whole test suite before you finish.',
+    'tests_off': ('Tests: none now – the owner\'s word, above any project rule that asks for them. Run no tests and no '
+                  'builds for checking; read your change once, quickly, for obvious mistakes, then finish. The checker '
+                  'checks the finished tasks later.'),
     'tests_batched': ('Tests: run only what touches this change – the test that fails without the fix, the nearest unit '
                       'tests and one or two related end-to-end tests. The full suite runs on its own every {every} tasks.'),
     'tests_red': ('The full test run is red at {sha} (last green: {green}). Log: {log}. Find the commit that broke it '

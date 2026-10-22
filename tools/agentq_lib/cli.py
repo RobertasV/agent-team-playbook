@@ -141,8 +141,9 @@ def main(argv=None):
     ro.add_argument('--session')
     ro.add_argument('--sessions', help='several sessions for one role (a pool), comma-separated')
     ro.add_argument('--add-session', action='append', help='add one session to the role\'s pool (repeat)')
-    te = sub.add_parser('tests', help='test mode: per-task or batched (the watcher runs the full suite every N tasks)')
-    te.add_argument('mode', nargs='?', choices=('per-task', 'batched'))
+    te = sub.add_parser('tests', help='test mode: per-task, batched (the watcher runs the full suite every N tasks) or '
+                                      'off (no tests; the programmer reads the change once, the checker still checks)')
+    te.add_argument('mode', nargs='?', choices=('per-task', 'batched', 'off'))
     st = sub.add_parser('stats', help='who works better: Claude or Codex (tasks, time, problems found later)')
     st.add_argument('--days', type=float, default=30)
     cw = sub.add_parser('codex-workers', help='open one Codex worker task per role (prefilled; the owner presses Send)')

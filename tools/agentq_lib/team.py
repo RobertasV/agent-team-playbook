@@ -126,7 +126,8 @@ def cmd_scale(cfg, opts):
 
 
 def cmd_tests(cfg, opts):
-    """The test mode in one word: per-task (each task runs the whole suite) or batched (the watcher runs it every N tasks)."""
+    """The test mode in one word: per-task (each task runs the whole suite), batched (the watcher runs it every N tasks)
+    or off (no tests: the programmer reads the change once; the checker's batches stay)."""
     if opts.mode:
         def change(raw):
             raw.setdefault('tests', {})['mode'] = opts.mode

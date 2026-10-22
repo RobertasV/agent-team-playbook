@@ -84,7 +84,7 @@ When `agentq live` names a role, that role restarts the owner's running copy of 
 
 ## Test mode
 
-The owner says which, in one word → `agentq tests per-task` or `agentq tests batched`. Per-task: each task runs the whole suite before it finishes. Batched: each task runs only what touches the change (the test that fails without the fix, the nearest unit tests, one or two related end-to-end tests); the watcher runs the whole suite itself every `tests.every` tasks in its own checkout, and a red run wakes the checker with the commits since the last green one. The brief says which mode applies.
+The owner says which, in one word → `agentq tests per-task`, `agentq tests batched` or `agentq tests off`. Off: no tests at all – the programmer reads the change once, quickly, and finishes; the checker's batches still check the finished tasks. Per-task: each task runs the whole suite before it finishes. Batched: each task runs only what touches the change (the test that fails without the fix, the nearest unit tests, one or two related end-to-end tests); the watcher runs the whole suite itself every `tests.every` tasks in its own checkout, and a red run wakes the checker with the commits since the last green one. The brief says which mode applies.
 
 ## How many work in parallel
 

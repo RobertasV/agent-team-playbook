@@ -455,6 +455,13 @@ def cmd_handover(cfg, opts):
     team = here or ('codex' if labels['by_codex'] in names else 'claude')
     other = 'claude' if team == 'codex' else 'codex'
     role = role_of_labels(cfg, names) or default_role(cfg)
+    if not opts.owner and role.get('agent', 'claude') not in (other, 'both'):  # that team is off: the owner decides
+        ask_owner(cfg, repo, number, cfg['texts']['handover_off'].format(tries=opts.tries, team=other, text=opts.text).strip(),
+                  role['role'])
+        update_state(cfg, lambda data: data.get('holders', {}).pop(f'{repo}#{number}', None))
+        print(f"{repo}#{number}: the {other} team does not work {role['role']} now – asked the owner what to do; "
+              f"take your next task")
+        return
     text = cfg['texts']['handover_owner' if opts.owner else 'handover'].format(tries=opts.tries, team=other,
                                                                               text=opts.text).strip()
     comment(cfg, repo, number, f'{text}\n{ROUTE_MARK}', role['role'], team)  # the route mark ends this team's claim

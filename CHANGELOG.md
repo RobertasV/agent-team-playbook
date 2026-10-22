@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.11 – 2026-10-22
+- Three failed tries with the other team off (Claude ↔ Codex): `agentq handover` asks the owner what to do instead of keeping the task for a team that takes nothing – a task had sat in the queue for nobody.
+
 ## 0.3.10 – 2026-10-22
 - An answer that comes after the asker stopped waiting goes back to the session that asked, when it is free (`assign N <role> --session <it>`), instead of to whichever worker is next: it knows the task. A busy asker leaves it to the queue as before.
 

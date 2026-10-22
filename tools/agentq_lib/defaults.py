@@ -30,6 +30,8 @@ DEFAULT_TEXTS = {
     'queued': 'queued for {role}.',
     'route': '→ {role}. {text}',
     'handover': 'not done in {tries} tries – over to the {team} team. {text}',
+    'handover_off': ('not done in {tries} tries, and the {team} team is off, so nobody else can take it. What now – '
+                     'another way, the {team} team back on, or leave it? {text}'),
     'handover_owner': 'the owner keeps this for the {team} team – over to it. {text}',
     'done': '{text}',
     'batch_title': 'Check: {refs}',

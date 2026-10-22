@@ -969,6 +969,13 @@ class TeamTest(Base):
         out = self.run_tool('watch', '--once', now=T1).stdout  # no Claude programmer works, so a resting one gets it
         self.assertIn(f'{REPO}#7 is kept for Claude and no Claude session works as programmer now: run '
                       f'`agentq assign {REPO}#7 programmer --session local_p`', out)
+        self.run_tool('team', 'claude')  # Codex off: a Claude worker's three failed tries go to the owner
+        self.data({REPO: {'open': [issue(7, 'Flaky e2e', ['prog', 'doing', 'claude'])]}, 'api': api})
+        out = self.run_tool('handover', '7', 'v4–v6 red too', env={'CLAUDECODE': '1'}).stdout
+        self.assertIn('the codex team does not work programmer now – asked the owner', out)
+        self.assertIn('the codex team is off, so nobody else can take it', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label',
+                                                             'ask owner', '--remove-label', 'doing'])
 
     def test_a_codex_dispatcher_gets_its_plans_as_messages(self):
         self.data({REPO: {'open': [issue(4, 'Something new')]}})

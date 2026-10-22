@@ -36,6 +36,8 @@ def main(argv=None):
     a = sub.add_parser('ask', help='ask the owner; the issue leaves the queue')
     a.add_argument('issue')
     a.add_argument('text')
+    a.add_argument('--wait', action='store_true', help='Claude: keep the task and wait (no tokens) for the answer, '
+                                                      'up to ask_wait_minutes (10); run it in the background')
     d = sub.add_parser('defer', help='the owner deferred it')
     d.add_argument('issue')
     d.add_argument('text', nargs='?')

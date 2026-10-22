@@ -87,15 +87,50 @@ def cmd_take(cfg, opts):
     print(f'{repo}#{number}: taken')
 
 
-def ask_owner(cfg, repo, number, text, who):
-    comment(cfg, repo, number, cfg['texts']['ask'].format(text=text), who)
+def ask_owner(cfg, repo, number, text, who, name=None):
+    comment(cfg, repo, number, cfg['texts']['ask'].format(text=text), who, name=name)
     relabel(repo, number, add=[cfg['labels']['question']], remove=[cfg['labels']['working']])
 
 
 def cmd_ask(cfg, opts):
+    """Ask the owner. The comment names the worker who asks; with --wait a Claude worker keeps the task and waits for
+    the answer without tokens (ask_wait_minutes, 10): an answer wakes it to carry on, none sends it to its next task."""
     repo, number = resolve(cfg, opts.issue)
-    ask_owner(cfg, repo, number, opts.text, holder(cfg, view(repo, number)))
-    print(f'{repo}#{number}: asked the owner, out of the queue')
+    ref = f'{repo}#{number}'
+    here = running_in()
+    session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if here == 'claude' else None
+    worker = load_state(cfg).get('holders', {}).get(ref) or session
+    who = holder(cfg, view(repo, number))
+    ask_owner(cfg, repo, number, opts.text, who, worker_title(cfg, worker) if worker else None)
+    if not opts.wait or here == 'codex':  # a Codex task never waits in a command
+        print(f'{ref}: asked the owner, out of the queue')
+        return 0
+    minutes = cfg['ask_wait_minutes']
+    deadline = time.time() + 60 * minutes
+    update_state(cfg, lambda d: d.setdefault('asking', {}).__setitem__(
+        ref, {'worker': worker, 'until': iso(now() + dt.timedelta(minutes=minutes))}))
+    try:
+        while time.time() < deadline:
+            time.sleep(cfg['ask_poll_seconds'])
+            words = unread_words(cfg, repo, number)
+            if words:
+                relabel(repo, number, add=[cfg['labels']['working']], remove=[cfg['labels']['question']])
+                print(f'{ref}: the owner answered – carry on with the task, you still hold it:')
+                for c in words:
+                    print(f"\n{c.get('body') or ''}")
+                mark_delivered(cfg, repo, words, cfg['forward_hours'])
+                return 0
+        role = role_by_name(cfg, who)
+
+        def release(data):
+            if data.get('holders', {}).get(ref) == worker:
+                del data['holders'][ref]
+        update_state(cfg, release)
+        print(cfg['texts']['ask_no_answer'].format(ref=ref, minutes=minutes, role=role['role'],
+                                                   next=f"{self_command()} next {shlex_quote(role['role'])} --wait"))
+        return 0
+    finally:
+        update_state(cfg, lambda d: d.get('asking', {}).pop(ref, None))
 
 
 def cmd_defer(cfg, opts):

@@ -21,6 +21,8 @@ DEFAULT_LABELS = {
 DEFAULT_TEXTS = {
     'take': 'taking this.',
     'ask': '{text}',
+    'ask_no_answer': ('No answer from the owner in {minutes} min – {ref} waits for them; when they answer, it comes back to '
+                      '{role}. Take your next task now: `{next}` (in the background).'),
     'defer': 'deferred. {text}',
     'wait': 'waiting for {ref}.',
     'back': '{ref} is closed – back in the queue.',
@@ -89,7 +91,8 @@ DEFAULT_TEXTS = {
     'split_from': 'Split from {ref}.',
     'act': ('This task is the owner\'s order: do it to the end without asking whether to. A question that points at '
             'something wrong ("why does this always spin?") reports a defect: find the cause and fix it. Stop with '
-            '`agentq ask` only for a choice that is the owner\'s – what the product should do where the task leaves it '
+            '`agentq ask` (in Claude: `agentq ask {ref} … --wait` with run_in_background – you keep the task and wait '
+            'up to 10 min for the answer, without tokens) only for a choice that is the owner\'s – what the product should do where the task leaves it '
             'open, money, publishing, deleting their data – never for a go-ahead, and never ask in your chat: nobody '
             'reads it. Skills that wait for the user\'s sign-off before working (brainstorming, design approval) do '
             'not apply to team tasks: the task is the sign-off. Three tries and it still fails (your fix does not pass '

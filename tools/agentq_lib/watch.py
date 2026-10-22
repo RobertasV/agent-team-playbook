@@ -239,6 +239,9 @@ def build_plan(cfg, state, start):
             if is_open and not primary and (waiting_word & set(names) or (
                     labels['working'] not in names and (cfg['skip'] - {labels['health']}) & set(names))):
                 continue  # the main computer's dispatcher hands it back
+            asking = state.get('asking', {}).get(ref)
+            if is_open and asking and parse_time(asking['until']) > start:
+                continue  # the worker who asked waits for this answer itself
             if is_open and waiting_word & set(names):
                 role = role or default_role(cfg)
                 plan.append(('answered', ref, role, item['title'], None))

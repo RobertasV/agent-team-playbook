@@ -889,6 +889,37 @@ class TeamTest(Base):
         self.assertIn('the full test run is red at abc123456789', self.body(made).lower())
         self.assertEqual([made[i + 1] for i, a in enumerate(made) if a == '--label'], ['check', 'priority'])
 
+    def test_a_question_names_the_asker_who_waits_for_the_answer_then_moves_on(self):
+        with open(self.config) as f:
+            cfg = json.load(f)
+        with open(self.config, 'w') as f:
+            json.dump({**cfg, 'ask_wait_minutes': 0.05, 'ask_poll_seconds': 0.2}, f)
+        ask = {f'repos/{REPO}/issues/7': {'title': 'Icon', 'body': 'x', 'labels': [{'name': 'prog'}, {'name': 'doing'}],
+                                          'user': {'login': 'boss'}},
+               f'repos/{REPO}/issues/7/comments': [{'user': {'login': 'bot'}, 'body': '🤖 programmer: which?',
+                                                    'created_at': '2026-01-02T12:00:00Z', 'id': 1}]}
+        self.data({REPO: {'open': [issue(7, 'Icon', ['prog', 'doing'])]}, 'api': ask})
+        self.state(lambda s: s.__setitem__('holders', {f'{REPO}#7': 'local_p'}))
+        claude = {'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_p'}
+        out = self.run_tool('ask', '7', 'Round or square?', '--wait', env=claude).stdout  # nobody answers
+        self.assertIn('(local_p): Round or square?', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn('No answer from the owner in 0.05 min', out)
+        self.assertIn('next programmer --wait', out)
+        self.assertNotIn(f'{REPO}#7', self.state().get('holders', {}))  # free for its next task
+        self.assertNotIn(f'{REPO}#7', self.state().get('asking', {}))
+        ask[f'repos/{REPO}/issues/7/comments'].append({'user': {'login': 'boss'}, 'body': 'Round.',
+                                                        'created_at': '2026-01-02T12:01:00Z', 'id': 2})
+        self.data({REPO: {'open': [issue(7, 'Icon', ['prog', 'doing'])]}, 'api': ask})
+        out = self.run_tool('ask', '7', 'Round or square?', '--wait', env=claude).stdout
+        self.assertIn('the owner answered – carry on', out)
+        self.assertIn('Round.', out)
+        self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '7', '-R', REPO, '--add-label', 'doing',
+                                                              '--remove-label', 'ask owner'])
+        self.state(lambda s: s.__setitem__('asking', {f'{REPO}#7': {'worker': 'local_p', 'until': '2026-01-02T12:10:00Z'}}))
+        waiting = issue(7, 'Icon', ['prog', 'ask owner'], comments=[said('boss', 'Square.', '2026-01-02T12:02:00Z')])
+        self.data({REPO: {'open': [waiting]}})
+        self.assertNotIn(f'{REPO}#7', self.run_tool('watch', '--once', now='2026-01-02T12:03:00Z').stdout)  # it waits itself
+
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})
         self.run_tool('team', 'both')

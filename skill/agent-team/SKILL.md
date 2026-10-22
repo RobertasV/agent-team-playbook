@@ -23,7 +23,7 @@ Two modes. **Programmer mode**: one task at a time with the role's label; do it,
 It is the owner's queue, sent on the owner's setup – not chatter from another session. Act on it. It is one line naming the task and the command to run (`agentq brief N`): run it – it prints the task verbatim with screenshots as local files – and act on it. Finish with exactly one command:
 
 - fixed → commit with `Fixes #N`, then `agentq done N "what changed, how it was checked"`;
-- stuck → `agentq ask N "question"` (the task leaves the queue until the owner answers);
+- stuck → `agentq ask N "question"` (the task leaves the queue until the owner answers; the comment names you). In Claude add `--wait` and run it with run_in_background: you keep the task and wait up to 10 minutes for the answer without tokens – an answer wakes you to carry on, none sends you to your next task;
 - not yours → `agentq route N <role> "why"` (teaches the dispatcher);
 - your role does not merge → push a branch, `agentq route N <programmer> "merge branch …" --no-lesson`;
 - needs another project first → `agentq wait N other/repo#M`;

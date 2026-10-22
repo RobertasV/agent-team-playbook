@@ -297,8 +297,8 @@ def batch_source(cfg, repo, items):
         last = transitions[-1] if transitions else {}
         if last.get('event') == 'reopened':
             raise Fail(f"{repo}#{item['number']} reopened before the batch was created")
-        if last.get('commit_id'):
-            closing[str(item['number'])] = last['commit_id']
+        if last.get('commit_id') and f'/repos/{repo.lower()}/commits/' in (last.get('commit_url') or '').lower():
+            closing[str(item['number'])] = last['commit_id']  # a commit of another repository closed it: no code here
     source = gh_json('api', f'repos/{repo}/commits/HEAD').get('sha', '')
     if not re.fullmatch(r'[0-9a-f]{40}', source):
         raise Fail(f'cannot pin the published default branch of {repo}')

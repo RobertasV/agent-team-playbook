@@ -265,8 +265,10 @@ def cmd_role(cfg, opts):
     def change(raw):
         if name.lower() == 'dispatcher':
             disp = raw.setdefault('dispatcher', {})
-            for key in ('session', 'model', 'effort'):
-                if getattr(opts, key) is not None:
+            if opts.agent not in (None, 'claude', 'codex', 'both'):
+                raise Fail('the dispatcher runs on claude, codex or both')
+            for key in ('session', 'model', 'effort', 'agent'):  # agent: which life's dispatcher runs
+                if getattr(opts, key, None) is not None:
                     disp[key] = getattr(opts, key)
             return
         roles = raw.setdefault('roles', [{**r, 'session': ''} for r in DEFAULT_ROLES])

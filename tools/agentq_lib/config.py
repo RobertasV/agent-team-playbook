@@ -129,9 +129,11 @@ def save_config(cfg, change):
 
 
 def role_by_name(cfg, name):
-    for role in cfg['roles']:
-        if role['role'].lower() == name.strip().lower():
-            return role
+    """A role by its name, or by its label (agents name a role by the label they see on the board)."""
+    for key in ('role', 'label'):
+        for role in cfg['roles']:
+            if role[key].lower() == name.strip().lower():
+                return role
     raise Fail(f'no role "{name}" (roles: {", ".join(r["role"] for r in cfg["roles"])})')
 
 

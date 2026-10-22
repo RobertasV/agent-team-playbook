@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.8 – 2026-10-22
+- A role can be named by its label (`assign N marketingas` for the role `marketingistas`): a dispatcher that read the board's label failed with "no role".
+- `agentq role dispatcher --agent claude|codex|both` sets which dispatcher runs; before, only `agentq team` changed it, and that also moved every role.
+- A task closed by a commit of another repository (e.g. an agentq fix that named it) no longer blocks the checker's batches forever: it has no code in this project to check.
+
 ## 0.3.7 – 2026-10-22
 - `agentq tests off`: no tests at all – every brief tells the programmer to run no tests or check builds, read the change once quickly and finish; the watcher starts no full runs; the checker's batches still check the finished tasks.
 

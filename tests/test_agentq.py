@@ -1334,7 +1334,8 @@ class TeamTest(Base):
         pathlib.Path(self.config).write_text(json.dumps(cfg))
         fixture = {**self.board(next=50), 'api': {
             f'repos/{REPO}/commits/HEAD': {'sha': source},
-            f'repos/{REPO}/issues/10/events?per_page=100': [{'event': 'closed', 'commit_id': source}],
+            f'repos/{REPO}/issues/10/events?per_page=100': [{'event': 'closed', 'commit_id': source,
+                                                             'commit_url': f'https://api.github.com/repos/{REPO}/commits/{source}'}],
             f'repos/{REPO}/issues/11/events?per_page=100': [{'event': 'closed', 'commit_id': None}],
         }}
         self.data(fixture)
@@ -1355,13 +1356,23 @@ class TeamTest(Base):
         git, checkout, old, source, fixture = self.batch_checkout()
         git(checkout, 'commit', '-qm', 'unpublished Fixes #10', '--allow-empty')
         missing = git(checkout, 'rev-parse', 'HEAD')
-        fixture['api'][f'repos/{REPO}/issues/10/events?per_page=100'][0]['commit_id'] = missing
+        event = fixture['api'][f'repos/{REPO}/issues/10/events?per_page=100'][0]
+        event.update(commit_id=missing, commit_url=f'https://api.github.com/repos/{REPO}/commits/{missing}')
         self.data(fixture)
         run = self.run_tool('batch', 'checker', ok=False)
         self.assertEqual(run.returncode, 1)
         self.assertIn('not a verified ancestor', run.stderr)
         self.assertIn(missing, run.stderr)
         self.assertEqual(self.calls(['issue', 'create']), [])
+        event['commit_url'] = f'https://api.github.com/repos/acme/tools/commits/{missing}'  # closed from another repo
+        self.data(fixture)
+        self.run_tool('batch', 'checker')  # no code of this project to check: no ancestry, the batch is made
+        self.assertNotIn('"10":', self.body(self.calls(['issue', 'create'])[-1]))
+
+    def test_a_role_is_found_by_its_label_and_the_dispatcher_takes_an_agent(self):
+        self.assertIn('designer', self.run_tool('assign', '7', 'design', '--queue').stdout)
+        self.run_tool('role', 'dispatcher', '--agent', 'codex')
+        self.assertEqual(json.load(open(self.config))['dispatcher']['agent'], 'codex')
 
     def test_batch_does_not_fall_back_to_head_when_fetch_fails(self):
         git, checkout, old, source, fixture = self.batch_checkout()

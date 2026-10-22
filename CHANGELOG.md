@@ -1,7 +1,7 @@
 # Changelog
 
 ## 0.3.9 – 2026-10-22
-- A question names who asks (`🤖 programuotojas · claude (Cutnook Programuotojas 2): …`), and `agentq ask N "…" --wait` (Claude, in the background) keeps the task and waits for the owner's answer without tokens, up to `ask_wait_minutes` (10): an answer wakes the worker to carry on with the task; none frees it for its next task, and the question goes back to the role when the owner answers later. The dispatcher leaves a question alone while its asker waits. Every brief and the skill say so.
+- A question names who asks (`🤖 programuotojas · claude (Programmer 2): …`), and `agentq ask N "…" --wait` (Claude, in the background) keeps the task and waits for the owner's answer without tokens, up to `ask_wait_minutes` (10): an answer wakes the worker to carry on with the task; none frees it for its next task, and the question goes back to the role when the owner answers later. The dispatcher leaves a question alone while its asker waits. Every brief and the skill say so.
 
 ## 0.3.8 – 2026-10-22
 - A role can be named by its label (`assign N marketingas` for the role `marketingistas`): a dispatcher that read the board's label failed with "no role".

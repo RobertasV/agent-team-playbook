@@ -919,6 +919,13 @@ class TeamTest(Base):
         waiting = issue(7, 'Icon', ['prog', 'ask owner'], comments=[said('boss', 'Square.', '2026-01-02T12:02:00Z')])
         self.data({REPO: {'open': [waiting]}})
         self.assertNotIn(f'{REPO}#7', self.run_tool('watch', '--once', now='2026-01-02T12:03:00Z').stdout)  # it waits itself
+        self.state(lambda s: s.pop('asking'))  # the wait is over: the answer goes back to whoever asked
+        out = self.run_tool('watch', '--once', now='2026-01-02T12:20:00Z').stdout
+        self.assertIn(f'assign {REPO}#7 programmer --session local_p', out)
+        self.state(lambda s: s.__setitem__('holders', {f'{REPO}#9': 'local_p'}))  # busy with another task: the queue
+        self.state(lambda s: s.__setitem__('watch', {}))
+        out = self.run_tool('watch', '--once', now='2026-01-02T13:00:00Z').stdout
+        self.assertNotIn('--session local_p', out)
 
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})

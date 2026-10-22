@@ -102,6 +102,8 @@ def cmd_ask(cfg, opts):
     worker = load_state(cfg).get('holders', {}).get(ref) or session
     who = holder(cfg, view(repo, number))
     ask_owner(cfg, repo, number, opts.text, who, worker_title(cfg, worker) if worker else None)
+    if worker:  # an answer later goes back to whoever asked, when free
+        update_state(cfg, lambda d: d.setdefault('asked_by', {}).__setitem__(ref, worker))
     if not opts.wait or here == 'codex':  # a Codex task never waits in a command
         print(f'{ref}: asked the owner, out of the queue')
         return 0

@@ -244,7 +244,12 @@ def build_plan(cfg, state, start):
                 continue  # the worker who asked waits for this answer itself
             if is_open and waiting_word & set(names):
                 role = role or default_role(cfg)
-                plan.append(('answered', ref, role, item['title'], None))
+                asker = state.get('asked_by', {}).get(ref)
+                if asker and pushes(role) and asker in role['pool'] and \
+                        asker not in [w for r, w in state.get('holders', {}).items() if r != ref]:  # free
+                    plan.append(('answered_to', ref, role, item['title'], None, asker))  # the one who asked goes on
+                else:
+                    plan.append(('answered', ref, role, item['title'], None))
                 taken.add(role['role'])
             elif is_open and labels['working'] not in names and (cfg['skip'] - {labels['health']}) & set(names):
                 role = role or default_role(cfg)  # set aside (deferred, waiting…), and the owner wrote on it:
@@ -317,6 +322,9 @@ def render_plan(cfg, plan, start, clear=False, wake=False):
             lines.append(f'{n}. the owner answered on {ref}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
         elif kind == 'assign':
             lines.append(f'{n}. next task for {role["role"]}: run `{q} assign {ref} {role["role"]}` and do what it prints.')
+        elif kind == 'answered_to':
+            lines.append(f'{n}. the owner answered on {ref}; session {sid} asked and is free: run '
+                         f'`{q} assign {ref} {role["role"]} --session {sid}` and do what it prints.')
         elif kind == 'assign_session':
             lines.append(f'{n}. {ref} is kept for Claude and no Claude session works as {role["role"]} now: run '
                          f'`{q} assign {ref} {role["role"]} --session {sid}` and do what it prints.')

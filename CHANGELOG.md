@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.10 – 2026-10-22
+- An answer that comes after the asker stopped waiting goes back to the session that asked, when it is free (`assign N <role> --session <it>`), instead of to whichever worker is next: it knows the task. A busy asker leaves it to the queue as before.
+
 ## 0.3.9 – 2026-10-22
 - A question names who asks (`🤖 programuotojas · claude (Programmer 2): …`), and `agentq ask N "…" --wait` (Claude, in the background) keeps the task and waits for the owner's answer without tokens, up to `ask_wait_minutes` (10): an answer wakes the worker to carry on with the task; none frees it for its next task, and the question goes back to the role when the owner answers later. The dispatcher leaves a question alone while its asker waits. Every brief and the skill say so.
 

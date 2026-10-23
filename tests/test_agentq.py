@@ -173,6 +173,9 @@ class AgentqTest(Base):
         self.assertIn(f'fixed  {REPO}#9: {OTHER}#4 closed', out)
         self.assertEqual(self.calls(['issue', 'edit'])[-1], ['issue', 'edit', '9', '-R', REPO, '--remove-label', 'waits'])
 
+    def test_help_is_a_command_too(self):
+        self.assertIn('queue', self.run_tool('help').stdout)
+
     def test_a_longer_text_comes_on_stdin_and_starts_below_the_signature(self):
         text = 'Which way?\n\n1. **Read only** – recommended.\n2. Keep the old versions.'
         run = subprocess.run([sys.executable, TOOL, '--config', self.config, 'ask', '#7', '-'], input=text + '\n',

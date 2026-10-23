@@ -178,6 +178,10 @@ def main(argv=None):
     for name, parser in sub.choices.items():  # agents add `--as <role>` out of habit: accepted everywhere
         if name not in ('next', 'open') and not any('--as' in a.option_strings for a in parser._actions):
             parser.add_argument('--as', dest='who', help=argparse.SUPPRESS)
+    args = list(argv if argv is not None else sys.argv[1:])
+    if (args[2:3] if args[:1] == ['--config'] else args[:1]) == ['help']:  # agents try `agentq help`
+        p.print_help()
+        return 0
     opts = p.parse_args(argv)
     if getattr(opts, 'text', None) == '-':  # a longer text, laid out in Markdown, comes on stdin (a heredoc)
         if hasattr(sys.stdin, 'reconfigure'):

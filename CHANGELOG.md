@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.13 – 2026-10-23
+- `agentq help` prints the commands (agents tried it and got an error).
+
 ## 0.3.12 – 2026-10-23
 - The watcher reads the most recently updated issues first, up to 300: on a busy day (166 issues changed in 24 h) the 100 newest-created ones left out three old tasks the owner had just answered, and their answers reached nobody.
 - After the Claude app restarts, a session that holds a task and has been quiet since is reminded at once, not after `idle_minutes`: the restart stopped its turn.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.12 – 2026-10-23
+- The watcher reads the most recently updated issues first, up to 300: on a busy day (166 issues changed in 24 h) the 100 newest-created ones left out three old tasks the owner had just answered, and their answers reached nobody.
+- After the Claude app restarts, a session that holds a task and has been quiet since is reminded at once, not after `idle_minutes`: the restart stopped its turn.
+
 ## 0.3.11 – 2026-10-22
 - Three failed tries with the other team off (Claude ↔ Codex): `agentq handover` asks the owner what to do instead of keeping the task for a team that takes nothing – a task had sat in the queue for nobody.
 

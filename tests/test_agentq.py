@@ -89,6 +89,7 @@ class Base(unittest.TestCase):
         return {**os.environ, 'AGENTQ_GH': FAKE, 'USERPROFILE': os.path.join(self.dir.name, 'home'),
                 'PYTHONUTF8': '0',  # agentq as it runs for a user: on Windows without Python's UTF-8 mode
                 'FAKE_GH_LOG': self.log, 'FAKE_GH_FIXTURE': self.fixture, 'AGENTQ_NOW': now,
+                'AGENTQ_APP_STARTED': '2000-01-01T00:00:00Z',  # not this computer's Claude app
                 'HOME': os.path.join(self.dir.name, 'home'), 'AGENTQ_CONFIG': '',
                 'AGENTQ_APP_SESSIONS': os.path.join(self.dir.name, 'app'), 'AGENTQ_TRANSCRIPTS': os.path.join(self.dir.name, 'tx'),
                 'CLAUDECODE': '', 'CODEX_THREAD_ID': '', 'CODEX_SANDBOX': '', 'CLAUDE_CODE_HOST_SESSION_ID': '',
@@ -427,6 +428,10 @@ class TeamTest(Base):
         self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z')], 'next': 70}})
         self.session('local_p', '2026-01-02T11:50:00Z')
         self.assertIn('no work', self.run_tool('watch', '--once', now=T0).stdout)  # quiet 10 min: fine
+        restarted = self.run_tool('watch', '--once', now=T1, env={'AGENTQ_APP_STARTED': '2026-01-02T11:55:00Z'}).stdout
+        self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z', restarted)  # at once
+        self.state(lambda s: s.pop('nudges'))
+        self.state(lambda s: s.__setitem__('watch', {}))
         out = self.run_tool('watch', '--once', now='2026-01-02T12:15:00Z').stdout
         self.assertIn(f'programmer holds {REPO}#7 but has been quiet since 2026-01-02T11:50:00Z: send this line to '
                       f"session local_p (agentq checked: it exists): `You hold {REPO}#7 ('doing'), but your session has been idle since 2026-01-02T11:50:00Z.", out)

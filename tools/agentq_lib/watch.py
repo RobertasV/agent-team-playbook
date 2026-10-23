@@ -21,7 +21,7 @@ from .config import capacity, default_role, pulls, pushes, role_of_labels, tests
 from .state import (
     comment_key, load_delivered, load_state, mark_delivered, save_state, update_state, waiting_workers, watch_lock
 )
-from .apps import codex_activity, codex_reachable, message_codex, reserve_codex, session_activity, session_of
+from .apps import app_started, codex_activity, codex_reachable, message_codex, reserve_codex, session_activity, session_of
 from .board import (
     batch_ready, busy_with, holder_of, kept_for, mark_urgent, next_issue, real_board, release_waits, save_board,
     session_held, take_next, taken_elsewhere, unchecked
@@ -29,7 +29,7 @@ from .board import (
 from .health import report_health
 
 
-def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=True):
+def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=True, restarted=None):
     """One reminder for a holder that went quiet; still quiet escalate_minutes later: the owner is told and the task
     goes back to the queue, so a free worker takes it."""
     nudges = state.setdefault('nudges', {})
@@ -37,8 +37,8 @@ def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=
     if nudge and last > parse_time(nudge['at']):
         nudges.pop(ref)  # it reacted
         nudge = None
-    if start - last < dt.timedelta(minutes=cfg['idle_minutes']):
-        return
+    if start - last < dt.timedelta(minutes=cfg['idle_minutes']) and not (restarted and last < restarted):
+        return  # quiet, but not for long – unless the app restarted since: that stopped its turn, remind it now
     if nudge is None:
         nudges[ref] = {'at': iso(start)}
         remind()
@@ -59,6 +59,7 @@ def check_held(cfg, state, repo, issues, start, plan):
     nudges = state.setdefault('nudges', {})
     checks = state.setdefault('held_checked', {})
     idle = dt.timedelta(minutes=cfg['idle_minutes'])
+    restarted = app_started()
     told = {r for r, n in nudges.items() if r.startswith(repo + '#') and n.get('told')}
     held = set()
     for role in cfg['roles']:
@@ -88,7 +89,7 @@ def check_held(cfg, state, repo, issues, start, plan):
                     checks[ref] = iso(start)
                 continue
             quiet_holder(cfg, state, repo, ref, role, sid, last, start,
-                         lambda: plan.append(('nudge', ref, role, issue['title'], iso(last), sid)))
+                         lambda: plan.append(('nudge', ref, role, issue['title'], iso(last), sid)), restarted=restarted)
     for table in (nudges, checks, state.setdefault('holders', {}), state.setdefault('claim_hosts', {})):
         for ref in [r for r in table if r.startswith(repo + '#') and r not in held]:
             del table[ref]
@@ -208,8 +209,10 @@ def build_plan(cfg, state, start):
         news, fresh = {}, []
         first = delivered is None or repo not in delivered
         urgent = state.setdefault('urgent', {})
-        for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '100',
-                            '--search', f'updated:>={iso(window)}', '--json', 'number,title,labels,state,comments,body,author'):
+        # the most recently updated first, and enough of them: on a busy day 100 newest-created issues left out an
+        # old one the owner had just answered
+        for item in gh_json('issue', 'list', '-R', repo, '--state', 'all', '--limit', '300', '--search',
+                            f'updated:>={iso(window)} sort:updated-desc', '--json', 'number,title,labels,state,comments,body,author'):
             if primary:
                 mark_urgent(cfg, repo, item, issues, urgent)
             answered_at = max([c['createdAt'] for c in item.get('comments', [])

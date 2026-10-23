@@ -12,7 +12,7 @@ import time
 from shutil import which as shutil_which
 
 from .system import APP_SESSIONS_DEFAULT, command_lines, lock_file, tool, unlock_file, WINDOWS
-from .base import one_line
+from .base import one_line, parse_time
 from .state import load_state
 
 
@@ -225,3 +225,21 @@ def reserve_codex(data, worker, seen, value):
         return False
     info['idle'], info['finished'] = value
     return True
+
+
+def app_started():
+    """When the Claude desktop app last started (macOS; None elsewhere or when it cannot be seen): a restart stops every
+    session's turn, so a session that holds a task and has been quiet since is reminded at once."""
+    if os.environ.get('AGENTQ_APP_STARTED'):
+        return parse_time(os.environ['AGENTQ_APP_STARTED'])
+    if WINDOWS:
+        return None
+    try:
+        out = subprocess.run(['ps', '-axo', 'lstart=,command='], capture_output=True, text=True, timeout=20).stdout
+        started = [line[:24] for line in out.splitlines() if line.rstrip().endswith('/Claude.app/Contents/MacOS/Claude')]
+        if not started:
+            return None
+        return dt.datetime.fromtimestamp(time.mktime(time.strptime(started[0].strip(), '%a %b %d %H:%M:%S %Y')),
+                                         dt.timezone.utc)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None

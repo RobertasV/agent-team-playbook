@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.1 – 2026-10-23
+- Every role's default effort is `medium` (was `xhigh`, `max` for hard issues), also for Codex workers, and INSTALL says so: a new install on another computer started its programmers at extra high. Higher only on the owner's word, per role.
+
 ## 0.4.0 – 2026-10-23 – the human test stage
 - Chosen tasks (label `human test`, with `testers` in the config) go to a person before they count as done: the programmer hands them over with `agentq handoff` (build, commit, scenarios; one iteration more each time), the tester's result on the issue – passed, found problems, could not test – closes the task, sends it back to the programmers, or asks the owner. Only a configured tester's result for the latest iteration counts; a question or anyone else's comment never does; the watcher acts on each result once, also after a restart. `done` refuses on a picked task, and a picked task closed by a `Fixes` commit is reopened. Tasks without the label work as before. The format a board shares: docs/HUMAN-TEST.md.
 

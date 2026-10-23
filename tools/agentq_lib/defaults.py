@@ -146,16 +146,16 @@ DEFAULT_TEXTS = {
 }
 
 DEFAULT_ROLES = [
-    {'role': 'programmer', 'label': 'programmer', 'mode': 'programmer', 'effort': 'xhigh', 'hard_effort': 'max',
+    {'role': 'programmer', 'label': 'programmer', 'mode': 'programmer', 'effort': 'medium', 'hard_effort': '',
      'merge': True,
      'description': "Default role: every task nobody else owns. The only role that interprets the owner's words."},
-    {'role': 'checker', 'label': 'checker', 'mode': 'checker', 'n': 5, 'hours': 24, 'effort': 'xhigh', 'hard_effort': 'max',
+    {'role': 'checker', 'label': 'checker', 'mode': 'checker', 'n': 5, 'hours': 24, 'effort': 'medium', 'hard_effort': '',
      'merge': False,
      'description': "Checks batches of finished tasks. The full release check runs only on the owner's word."},
 ]
 
 PRESETS = {
-    'marketer': {'mode': 'programmer', 'merge': True, 'effort': 'xhigh', 'hard_effort': 'max',
+    'marketer': {'mode': 'programmer', 'merge': True, 'effort': 'medium', 'hard_effort': '',
                  'description': 'Prepares posts, ads and campaigns. Anything public or paid happens only on the '
                                 "owner's word.",
                  'examples': ['write the launch post', 'draft three ad texts for the new feature',

@@ -186,7 +186,7 @@ def cmd_workers(cfg, opts):
     have = {w for w, i in load_state(cfg).get('codex', {}).items() if i.get('host') == host and codex_activity(i['thread'])}
     names = [(r['role'], f"codex-{r['role'].replace(' ', '-')}" + (f'-{n}' if n > 1 else ''),
               f"Codex {r['role']}" + (f' {n}' if n > 1 else ''),
-              {'max': 'xhigh'}.get(r['effort'], r['effort']) or 'xhigh',  # Codex has no "max"
+              {'max': 'xhigh'}.get(r['effort'], r['effort']) or 'medium',  # Codex has no "max"
               r.get('codex_model') or cfg['codex_model'])
              for r in roles for n in range(1, opts.count + 1)]
     missing = [x for x in names if x[1] not in have]

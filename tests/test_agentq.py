@@ -674,7 +674,7 @@ class TeamTest(Base):
         os.remove(os.path.join(self.dir.name, 'codexhome', 'sessions', '2026', '01', '02',
                                'rollout-2026-01-02T08-00-00-t2.jsonl'))  # the owner archived codex-designer
         out = self.run_tool('codex-workers').stdout
-        self.assertIn('--- Codex designer (model: the app default, reasoning effort: xhigh) ---', out)
+        self.assertIn('--- Codex designer (model: the app default, reasoning effort: medium) ---', out)
         self.run_tool('role', 'programmer', '--codex-model', 'model-b')
         more = self.run_tool('codex-workers', '3', '--role', 'programmer').stdout  # "3 Codex programmers"
         self.assertIn('--- Codex programmer 2 (model: model-b, reasoning effort: high) ---', more)

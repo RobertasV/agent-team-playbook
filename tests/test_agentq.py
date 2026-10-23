@@ -953,10 +953,12 @@ class TeamTest(Base):
         self.state(lambda s: s.pop('asking'))  # the wait is over: the answer goes back to whoever asked
         out = self.run_tool('watch', '--once', now='2026-01-02T12:20:00Z').stdout
         self.assertIn(f'assign {REPO}#7 programmer --session local_p', out)
-        self.state(lambda s: s.__setitem__('holders', {f'{REPO}#9': 'local_p'}))  # busy with another task: the queue
+        self.state(lambda s: s.__setitem__('holders', {f'{REPO}#9': 'local_p'}))  # busy: the answer waits for it
         self.state(lambda s: s.__setitem__('watch', {}))
         out = self.run_tool('watch', '--once', now='2026-01-02T13:00:00Z').stdout
-        self.assertNotIn('--session local_p', out)
+        self.assertNotIn(f'{REPO}#7', out)  # locked to its asker: nobody else gets it
+        run = self.run_tool('ask', '7', 'Again?', env=claude, ok=False)  # without --wait in Claude: not asked
+        self.assertIn('run_in_background', run.stderr)
 
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})

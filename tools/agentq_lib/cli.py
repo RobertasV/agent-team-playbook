@@ -38,6 +38,8 @@ def main(argv=None):
     a.add_argument('text')
     a.add_argument('--wait', action='store_true', help='Claude: keep the task and wait (no tokens) for the answer, '
                                                       'up to ask_wait_minutes (10); run it in the background')
+    a.add_argument('--no-wait', action='store_true', help='Claude: ask and move on at once (the answer still comes '
+                                                         'back to you)')
     d = sub.add_parser('defer', help='the owner deferred it')
     d.add_argument('issue')
     d.add_argument('text', nargs='?')

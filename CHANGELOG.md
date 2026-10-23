@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.16 – 2026-10-23
+- A Claude worker's question waits for the answer: `agentq ask` in Claude refuses without `--wait` (or an explicit `--no-wait`) – about one question in three had skipped the wait. A question stays locked to its asker: a later answer goes back to it when it is free, and nobody else takes the task meanwhile.
+
 ## 0.3.15 – 2026-10-23
 - Clearing a long conversation is off by default (`clear_tokens`, 0): an owner who finds an emptied window disturbing keeps conversations short with the project's `.claude/settings.json` `"autoCompactWindow": 200000` instead – the window keeps a summary. INSTALL.md says so.
 

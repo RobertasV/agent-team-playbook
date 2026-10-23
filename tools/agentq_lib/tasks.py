@@ -98,6 +98,10 @@ def cmd_ask(cfg, opts):
     repo, number = resolve(cfg, opts.issue)
     ref = f'{repo}#{number}'
     here = running_in()
+    if here == 'claude' and not opts.wait and not getattr(opts, 'no_wait', False):  # forgotten too often: required
+        raise Fail(f"not asked yet – a Claude worker waits for the owner's answer: run `{self_command()} ask {ref} "
+                   f"\"…\" --wait` with run_in_background (it waits up to {cfg['ask_wait_minutes']} min without tokens and "
+                   f"wakes you with the answer); --no-wait only when you must move on at once")
     session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if here == 'claude' else None
     worker = load_state(cfg).get('holders', {}).get(ref) or session
     who = holder(cfg, view(repo, number))

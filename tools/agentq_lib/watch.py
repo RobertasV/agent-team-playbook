@@ -248,11 +248,11 @@ def build_plan(cfg, state, start):
             if is_open and waiting_word & set(names):
                 role = role or default_role(cfg)
                 asker = state.get('asked_by', {}).get(ref)
-                if asker and pushes(role) and asker in role['pool'] and \
-                        asker not in [w for r, w in state.get('holders', {}).items() if r != ref]:  # free
-                    plan.append(('answered_to', ref, role, item['title'], None, asker))  # the one who asked goes on
-                else:
-                    plan.append(('answered', ref, role, item['title'], None))
+                if asker and pushes(role) and asker in role['pool']:  # the task stays with the one who asked
+                    if asker not in [w for r, w in state.get('holders', {}).items() if r != ref]:
+                        plan.append(('answered_to', ref, role, item['title'], None, asker))
+                    continue  # busy with another task: the answer waits for it, nobody else takes this one
+                plan.append(('answered', ref, role, item['title'], None))
                 taken.add(role['role'])
             elif is_open and labels['working'] not in names and (cfg['skip'] - {labels['health']}) & set(names):
                 role = role or default_role(cfg)  # set aside (deferred, waiting…), and the owner wrote on it:

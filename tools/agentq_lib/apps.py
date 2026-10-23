@@ -243,3 +243,32 @@ def app_started():
                                          dt.timezone.utc)
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
+
+
+def context_tokens(cfg, session):
+    """How long a Claude session's conversation is now: the tokens its last model call read (new, cached and
+    cache-written), from the end of its transcript. None when this cannot be seen."""
+    meta = read_meta(cfg, session)
+    cli = meta.get('cliSessionId')
+    if not isinstance(cli, str) or not cli:
+        return None
+    paths = glob.glob(os.path.join(glob.escape(cfg['transcripts']), '*', f'{glob.escape(cli)}.jsonl'))
+    if not paths:
+        return None
+    try:
+        with open(paths[0], 'rb') as f:
+            f.seek(max(0, os.path.getsize(paths[0]) - 2_000_000))
+            lines = f.read().decode('utf-8', 'replace').splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if '"usage"' not in line:
+            continue
+        try:
+            usage = json.loads(line).get('message', {}).get('usage') or {}
+        except ValueError:
+            continue
+        if isinstance(usage, dict) and usage:
+            return sum(int(usage.get(k) or 0) for k in ('input_tokens', 'cache_read_input_tokens',
+                                                        'cache_creation_input_tokens'))
+    return None

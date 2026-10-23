@@ -427,6 +427,28 @@ class TeamTest(Base):
         self.assertIn('GB free on this computer', out)
         self.assertEqual(self.calls(['issue', 'comment']), [])  # nothing written on the main computer's issue
 
+    def test_a_worker_with_a_long_conversation_clears_it_when_it_finishes(self):
+        self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'])]}})
+        self.session('local_p', T0)
+        tx = os.path.join(self.dir.name, 'tx', '-proj', 'cli-local_p.jsonl')
+
+        def said_last(read):
+            with open(tx, 'a') as f:
+                f.write(json.dumps({'type': 'assistant', 'message': {'usage': {
+                    'input_tokens': 10, 'cache_read_input_tokens': read, 'cache_creation_input_tokens': 500}}}) + '\n')
+        claude = {'CLAUDECODE': '1', 'CLAUDE_CODE_HOST_SESSION_ID': 'local_p'}
+        said_last(80000)
+        self.assertNotIn('clear_session', self.run_tool('done', '7', 'fixed', env=claude).stdout)
+        said_last(450000)
+        out = self.run_tool('done', '7', 'fixed', env=claude).stdout
+        self.assertIn('Your conversation is 450k tokens (over 200k)', out)
+        self.assertIn('call clear_session with session_id "self"', out)
+        folder = os.path.join(self.dir.name, 'disp')
+        from agentq_lib import config, install
+        install.install_dispatcher(config.load_config(self.config), folder)
+        with open(os.path.join(folder, '.claude', 'settings.json')) as f:
+            self.assertEqual(json.load(f)['autoCompactWindow'], 120000)  # the dispatcher compacts early
+
     def test_a_quiet_session_holding_a_task_is_reminded_once_then_the_owner_is_told(self):
         self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'], updated='2026-01-02T09:00:00Z')], 'next': 70}})
         self.session('local_p', '2026-01-02T11:50:00Z')

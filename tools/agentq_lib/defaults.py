@@ -21,6 +21,10 @@ DEFAULT_LABELS = {
 DEFAULT_TEXTS = {
     'take': 'taking this.',
     'ask': '{text}',
+    'clear_now': ('Your conversation is {tokens} tokens (over {limit}): every step re-reads all of it. Do not run '
+                  '`agentq next` now. As your very last step call clear_session with session_id "self" (load it with '
+                  'ToolSearch if needed) – the dispatcher sends your next task to the clean session, and its brief '
+                  'brings everything.'),
     'ask_no_answer': ('No answer from the owner in {minutes} min – {ref} waits for them; when they answer, it comes back to '
                       '{role}. Take your next task now: `{next}` (in the background).'),
     'defer': 'deferred. {text}',

@@ -11,7 +11,7 @@ from .watch import cmd_held, cmd_nudge, cmd_watch
 from .brief import cmd_brief
 from .tasks import (
     cmd_ask, cmd_assign, cmd_batch, cmd_check, cmd_checked, cmd_defer, cmd_done, cmd_handover, cmd_next, cmd_queue,
-    cmd_route, cmd_take, cmd_wait, note_finished
+    clear_if_long, cmd_route, cmd_take, cmd_wait, note_finished
 )
 from .links import cmd_link, cmd_move, cmd_open, cmd_split
 from .install import cmd_init, cmd_setup
@@ -207,6 +207,8 @@ def main(argv=None):
         code = commands[opts.cmd](cfg, opts) or 0
         if code == 0 and opts.cmd in ('done', 'ask', 'route', 'handover', 'wait', 'move', 'checked'):
             note_finished(cfg)
+            if not (opts.cmd == 'ask' and getattr(opts, 'wait', False)):  # an answered ask carries on with its task
+                clear_if_long(cfg)
         return code
     except Fail as e:
         print(f'agentq: {e}', file=sys.stderr)

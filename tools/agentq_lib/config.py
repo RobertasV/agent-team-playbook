@@ -105,6 +105,7 @@ def load_config(path):
     cfg['tests'] = tests
     cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
     cfg['ask_wait_minutes'] = cfg.get('ask_wait_minutes', 10)
+    cfg['clear_tokens'] = int(cfg.get('clear_tokens', 200000))
     cfg['ask_poll_seconds'] = cfg.get('ask_poll_seconds', 20)
     cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)
     cfg['app_sessions'] = os.path.expanduser(os.environ.get('AGENTQ_APP_SESSIONS') or cfg.get('app_sessions') or

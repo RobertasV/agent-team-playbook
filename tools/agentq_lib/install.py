@@ -57,6 +57,18 @@ def install_dispatcher(cfg, folder):
             with open(target, 'w', encoding='utf-8') as f:
                 f.write(text)
             print(f'dispatcher: {target} written')
+    settings = os.path.join(folder, '.claude', 'settings.json')  # the dispatcher needs no memory: compact it early
+    try:
+        with open(settings, encoding='utf-8') as f:
+            current = json.load(f)
+    except (OSError, ValueError):
+        current = {}
+    window = int(cfg['dispatcher'].get('compact_tokens') or 120000)
+    if isinstance(current, dict) and current.get('autoCompactWindow') != window:
+        os.makedirs(os.path.dirname(settings), exist_ok=True)
+        with open(settings, 'w', encoding='utf-8') as f:
+            json.dump({**current, 'autoCompactWindow': window}, f, indent=2)
+        print(f'dispatcher: {settings} – compacts at {window} tokens')
     at = os.path.join(folder, PROJECT_CONFIG)
     if link(cfg['_path'], at):
         print(f'dispatcher: {at} → {cfg["_path"]}')

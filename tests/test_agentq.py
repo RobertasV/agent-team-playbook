@@ -960,6 +960,63 @@ class TeamTest(Base):
         run = self.run_tool('ask', '7', 'Again?', env=claude, ok=False)  # without --wait in Claude: not asked
         self.assertIn('run_in_background', run.stderr)
 
+    def test_a_task_picked_for_a_human_test_closes_only_on_the_testers_pass_for_its_latest_iteration(self):
+        self.config_change(testers=['tina'])
+        key = f'repos/{REPO}/issues/7/comments'
+        picked = ['prog', 'human test', 'doing']
+        api = {f'repos/{REPO}/issues/7': {'title': 'Cart', 'body': 'x', 'user': {'login': 'boss'},
+                                           'labels': [{'name': n} for n in picked]}, key: []}
+        self.data({REPO: {'open': [issue(7, 'Cart', picked)]}, 'api': api})
+        self.assertIn('Human test: this task is picked', self.run_tool('brief', '7').stdout)
+        run = self.run_tool('done', '7', 'fixed', ok=False)  # a picked task is not done when its code is
+        self.assertIn('picked for a human test: not closed', run.stderr)
+        self.assertEqual(self.calls(['issue', 'close']), [])
+        self.run_tool('handoff', '7', '1. Open the cart. 2. Add two items. Expect: total 20.', '--build', 'v1.2-rc1',
+                      '--commit', 'abc123')
+        said_ = self.body(self.calls(['issue', 'comment'])[-1])
+        self.assertIn('iteration 1', said_)
+        self.assertIn('<!-- agentq:human-test {"iteration": 1, "build": "v1.2-rc1", "commit": "abc123", "tester": "tina"} -->', said_)
+        self.assertIn(['issue', 'edit', '7', '-R', REPO, '--add-label', 'testing', '--remove-label', 'doing'], self.calls(['issue', 'edit']))
+        self.assertIn(['issue', 'edit', '7', '-R', REPO, '--add-assignee', 'tina'], self.calls(['issue', 'edit']))
+
+        def board_says(*comments, now):
+            data = json.load(open(self.fixture))
+            data['api'][key] += [{'id': 2000 + len(data['api'][key]), 'user': {'login': who}, 'body': body,
+                                  'created_at': at} for who, body, at in comments]
+            data[REPO]['open'] = [issue(7, 'Cart', ['prog', 'human test', 'testing'])]
+            with open(self.fixture, 'w') as f:
+                json.dump(data, f)
+            self.run_tool('watch', '--once', now=now)
+        result = lambda it, r: f'<!-- agentq:test-result {{"iteration": {it}, "result": "{r}"}} -->'
+        board_says(('tina', 'is the cart page the new one?', '2026-01-02T12:01:00Z'),  # a question is no result
+                   ('boss', 'looks fine ' + result(1, 'pass'), '2026-01-02T12:02:00Z'), now=T2)  # nor the owner's word
+        self.assertEqual(self.calls(['issue', 'close']), [])
+        board_says(('tina', 'Total shows 10. ' + result(1, 'fail'), '2026-01-02T12:03:00Z'), now='2026-01-02T12:04:00Z')
+        self.assertIn('found problems in iteration 1', self.body(self.calls(['issue', 'comment'])[-1]))
+        self.assertIn(['issue', 'edit', '7', '-R', REPO, '--remove-label', 'testing'], self.calls(['issue', 'edit']))
+        self.assertIn('Total shows 10.', self.run_tool('brief', '7').stdout)  # the findings reach the programmer
+        before = len(self.calls(['issue', 'comment']))
+        board_says(now='2026-01-02T12:05:00Z')  # the same result read again (a restarted watcher): nothing twice
+        self.assertEqual(len(self.calls(['issue', 'comment'])), before)
+        self.run_tool('handoff', '7', 'Same steps.', '--build', 'v1.2-rc2', now='2026-01-02T12:06:00Z')
+        self.assertIn('"iteration": 2', self.body(self.calls(['issue', 'comment'])[-1]))
+        board_says(('tina', 'old one ' + result(1, 'pass'), '2026-01-02T12:07:00Z'), now='2026-01-02T12:08:00Z')
+        self.assertEqual(self.calls(['issue', 'close']), [])  # a result for iteration 1 does not pass iteration 2
+        board_says(('tina', 'Total 20 now. ' + result(2, 'pass'), '2026-01-02T12:09:00Z'), now='2026-01-02T12:10:00Z')
+        self.assertEqual(self.calls(['issue', 'close'])[-1], ['issue', 'close', '7', '-R', REPO])
+        self.assertIn('human test passed – @tina, iteration 2, build v1.2-rc2', self.body(self.calls(['issue', 'comment'])[-1]))
+
+    def test_a_picked_task_closed_by_a_commit_before_its_test_is_reopened(self):
+        self.config_change(testers=['tina'])
+        self.data({REPO: {'open': [], 'closed': [closed(8, 'Menu', '2026-01-02T11:59:00Z', ['prog', 'human test'])]},
+                   'api': {f'repos/{REPO}/issues/8/events?per_page=100': [{'event': 'closed', 'commit_id': 'f00d'}]}})
+        self.run_tool('watch', '--once', now=T1)
+        self.assertEqual(self.calls(['issue', 'reopen'])[-1], ['issue', 'reopen', '8', '-R', REPO])
+        self.data({REPO: {'open': [], 'closed': [closed(8, 'Menu', '2026-01-02T11:59:00Z', ['prog', 'human test'])]},
+                   'api': {f'repos/{REPO}/issues/8/events?per_page=100': [{'event': 'closed', 'actor': {'login': 'boss'}}]}})
+        self.run_tool('watch', '--once', now=T2)
+        self.assertEqual(len(self.calls(['issue', 'reopen'])), 1)  # the owner closed it: that stands
+
     def test_a_task_kept_for_claude_goes_to_no_codex_worker_and_to_the_named_session(self):
         self.data({REPO: {'open': [], 'labels': []}})
         self.run_tool('team', 'both')

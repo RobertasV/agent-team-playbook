@@ -9,6 +9,7 @@ from .config import find_config, load_config
 from .health import cmd_health
 from .watch import cmd_held, cmd_nudge, cmd_watch
 from .brief import cmd_brief
+from .human import cmd_handoff
 from .tasks import (
     cmd_ask, cmd_assign, cmd_batch, cmd_check, cmd_checked, cmd_defer, cmd_done, cmd_handover, cmd_next, cmd_queue,
     clear_if_long, cmd_route, cmd_take, cmd_wait, note_finished
@@ -33,6 +34,13 @@ def main(argv=None):
     q.add_argument('--all', action='store_true', help='also count skipped issues by label')
     q.add_argument('--peek', action='store_true', help='do not move the "since" mark')
     sub.add_parser('take', help='start an issue').add_argument('issue')
+    ho2 = sub.add_parser('handoff', help='a task picked for a human test: hand it to the tester with the build and '
+                                         'the scenarios (text or - for stdin); it stays open until the result')
+    ho2.add_argument('issue')
+    ho2.add_argument('text')
+    ho2.add_argument('--build', required=True, help='where and which version to open (a link, a version, an installer)')
+    ho2.add_argument('--commit', help='the commit that build is made of')
+    ho2.add_argument('--tester', help="one of the config's testers (default: the first)")
     a = sub.add_parser('ask', help='ask the owner; the issue leaves the queue')
     a.add_argument('issue')
     a.add_argument('text')
@@ -203,7 +211,7 @@ def main(argv=None):
                 'check': cmd_check, 'watch': cmd_watch, 'assign': cmd_assign, 'brief': cmd_brief, 'route': cmd_route, 'handover': cmd_handover,
                 'teach': cmd_teach, 'roles': cmd_roles, 'done': cmd_done, 'batch': cmd_batch, 'checked': cmd_checked,
                 'health': cmd_health, 'setup': cmd_setup, 'role': cmd_role, 'move': cmd_move, 'split': cmd_split, 'open': cmd_open,
-                'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'live': cmd_live, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
+                'handoff': cmd_handoff, 'link': cmd_link, 'scale': cmd_scale, 'stats': cmd_stats, 'codex-workers': cmd_workers, 'team': cmd_team, 'live': cmd_live, 'next': cmd_next, 'tests': cmd_tests, 'pause': cmd_pause, 'resume': cmd_resume, 'held': cmd_held, 'nudge': cmd_nudge}
     try:
         cfg = load_config(find_config(opts.config))
         code = commands[opts.cmd](cfg, opts) or 0

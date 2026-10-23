@@ -496,6 +496,9 @@ def cmd_done(cfg, opts):
         for c in unread:
             print(f"--- the owner ({login_of(c)}), {c['created_at']} ---\n{(c.get('body') or '').strip()}")
         return 1
+    if cfg['testers'] and cfg['labels']['human_test'] in labels_of(issue):  # picked: a person's test decides
+        raise Fail(f"{repo}#{number} is picked for a human test: not closed. Hand it to the tester – "
+                   f"`{self_command()} handoff {repo}#{number} --build \"…\" --commit <sha> - <<'EOF'` scenarios `EOF`")
     comment(cfg, repo, number, cfg['texts']['done'].format(text=opts.text), holder(cfg, issue))
     if cfg['labels']['working'] in labels_of(issue):
         relabel(repo, number, remove=[cfg['labels']['working']])

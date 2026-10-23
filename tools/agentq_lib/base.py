@@ -15,6 +15,9 @@ WAIT_MARK = re.compile(r'<!-- agentq:wait ([\w.-]+/[\w.-]+)#(\d+) -->')
 ROUTE_MARK = '<!-- agentq:route -->'
 CLAIM_MARK = re.compile(r'<!-- agentq:claim (\S+) -->')
 BATCH_MARK = re.compile(r'<!-- agentq:batch (\{.*?\}) -->')
+HANDOFF_MARK = re.compile(r'<!-- agentq:human-test (\{.*?\}) -->')  # the format Margin shares: docs/HUMAN-TEST.md
+RESULT_MARK = re.compile(r'<!-- agentq:test-result (\{.*?\}) -->')
+PROCESSED_MARK = re.compile(r'<!-- agentq:test-processed (\{.*?\}) -->')
 REF = re.compile(r'^(?:([\w.-]+/[\w.-]+)#)?#?(\d+)$')
 ARROW = re.compile(r'\s*(?:→|->)\s*')
 

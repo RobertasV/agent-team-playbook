@@ -80,7 +80,7 @@ def load_config(path):
     cfg['role'] = cfg.get('role') or cfg['default_role']
     cfg['dispatcher'] = {'name': 'dispatcher', 'folder': '', 'session': '', 'agent': 'claude', **cfg.get('dispatcher', {})}
     skip = set(cfg.get('skip_labels', []))
-    skip.update(cfg['labels'][k] for k in ('question', 'deferred', 'waiting', 'owner_word', 'health'))
+    skip.update(cfg['labels'][k] for k in ('question', 'deferred', 'waiting', 'owner_word', 'health', 'testing'))
     cfg['skip'] = skip
     cfg['state_file'] = os.path.expanduser(cfg.get('state_file') or cfg['_path'] + '.state.json')
     cfg['stale_hours'] = cfg.get('stale_hours', 24)
@@ -105,6 +105,7 @@ def load_config(path):
     cfg['tests'] = tests
     cfg['idle_minutes'] = cfg.get('idle_minutes', 20)
     cfg['ask_wait_minutes'] = cfg.get('ask_wait_minutes', 10)
+    cfg['testers'] = [t for t in cfg.get('testers') or [] if isinstance(t, str) and t.strip()]  # human test
     cfg['clear_tokens'] = int(cfg.get('clear_tokens') or 0)  # off: the project's autoCompactWindow keeps it short
     cfg['ask_poll_seconds'] = cfg.get('ask_poll_seconds', 20)
     cfg['escalate_minutes'] = cfg.get('escalate_minutes', 30)

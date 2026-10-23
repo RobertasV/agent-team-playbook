@@ -60,7 +60,7 @@ elif args[:2] == ['issue', 'comment']:  # remembered, so a claim can read itself
                     'created_at': os.environ.get('AGENTQ_NOW', '2026-01-02T12:00:00Z')})
     with open(os.environ['FAKE_GH_FIXTURE'], 'w', encoding='utf-8') as f:
         json.dump(data, f)
-elif args[:2] in (['issue', 'edit'], ['issue', 'close'], ['label', 'create']):
+elif args[:2] in (['issue', 'edit'], ['issue', 'close'], ['issue', 'reopen'], ['label', 'create']):
     pass
 elif args[:3] == ['api', '-X', 'DELETE']:
     pass

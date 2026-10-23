@@ -74,7 +74,9 @@ def cmd_brief(cfg, opts):
     comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '-H', FULL, '--paginate')
     owners = set(cfg['owner_accounts'])
     since = parse_time(opts.since) if opts.since else None
-    picked = [c for c in comments if login_of(c) in owners and (since is None or parse_time(c['created_at']) >= since)]
+    testers = {t.lower() for t in cfg['testers']}  # their results reach the programmer; they are not the owner
+    picked = [c for c in comments if (login_of(c) in owners or (login_of(c) or '').lower() in testers)
+              and (since is None or parse_time(c['created_at']) >= since)]
     names = labels_of(issue)
     role = role_of_labels(cfg, names) or default_role(cfg)
     folder = os.path.join(cfg['shots_dir'], repo.replace('/', '-'), str(number))
@@ -95,7 +97,8 @@ def cmd_brief(cfg, opts):
         c = handover[-1]
         out += [f"--- handed over, {c['created_at']} ---", c['body'].replace(ROUTE_MARK, '').strip()]
     for c in picked:
-        out += [f"--- the owner ({login_of(c)}), {c['created_at']} ---", (c.get('body') or '').strip()]
+        who = 'the owner' if login_of(c) in owners else 'the human tester'
+        out += [f"--- {who} ({login_of(c)}), {c['created_at']} ---", (c.get('body') or '').strip()]
         shots += download_shots(c.get('body_html'), folder, len(shots) + 1)
     if shots:
         out.append('--- screenshots, in order, as local files ---')
@@ -107,6 +110,8 @@ def cmd_brief(cfg, opts):
         out += ['---', texts['act'].format(ref=ref), texts[finish].format(ref=ref, number=number, default=cfg['default_role'])]
         if cfg['links'] and not batch:
             out.append(texts['finish_links'].format(ref=ref))
+        if cfg['testers'] and cfg['labels']['human_test'] in names:
+            out.append(texts['human_brief'].format(ref=ref, number=number))
         if not batch and role['mode'] == 'programmer':
             mode = cfg['tests']['mode']
             out.append(texts['tests_batched' if mode == 'batched' else 'tests_off' if mode == 'off' else 'tests_per_task']

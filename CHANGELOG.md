@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.0 – 2026-10-23 – the human test stage
+- Chosen tasks (label `human test`, with `testers` in the config) go to a person before they count as done: the programmer hands them over with `agentq handoff` (build, commit, scenarios; one iteration more each time), the tester's result on the issue – passed, found problems, could not test – closes the task, sends it back to the programmers, or asks the owner. Only a configured tester's result for the latest iteration counts; a question or anyone else's comment never does; the watcher acts on each result once, also after a restart. `done` refuses on a picked task, and a picked task closed by a `Fixes` commit is reopened. Tasks without the label work as before. The format a board shares: docs/HUMAN-TEST.md.
+
 ## 0.3.16 – 2026-10-23
 - A Claude worker's question waits for the answer: `agentq ask` in Claude refuses without `--wait` (or an explicit `--no-wait`) – about one question in three had skipped the wait. A question stays locked to its asker: a later answer goes back to it when it is free, and nobody else takes the task meanwhile.
 

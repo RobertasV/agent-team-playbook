@@ -27,6 +27,7 @@ from .board import (
     session_held, take_next, taken_elsewhere, unchecked
 )
 from .health import report_health
+from .human import human_tests
 
 
 def quiet_holder(cfg, state, repo, ref, role, who, last, start, remind, release=True, restarted=None):
@@ -204,6 +205,11 @@ def build_plan(cfg, state, start):
         primary = cfg['primary']
         if primary:
             release_waits(cfg, state, repo, issues, start)
+            if cfg['testers']:  # the human test stage: results acted on once, picked tasks kept open until a pass
+                closed = gh_json('issue', 'list', '-R', repo, '--state', 'closed', '--label', labels['human_test'],
+                                 '--limit', '50', '--search', f'closed:>={iso(start - dt.timedelta(hours=2))}',
+                                 '--json', 'number,labels,state')
+                human_tests(cfg, state, repo, issues, closed)  # could-not-test goes to the owner as a question
         boards[repo] = {'at': iso(start), 'issues': issues}
         taken = set()
         news, fresh = {}, []

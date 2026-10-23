@@ -16,7 +16,7 @@ from .lessons import write_roles
 def all_labels(cfg):
     names = {cfg['labels'][k]: k for k in ('working', 'question', 'deferred', 'waiting', 'priority', 'blocking',
                                             'hard', 'owner_word', 'batch', 'health', 'by_claude', 'by_codex',
-                                            'only_claude', 'only_codex')}
+                                            'only_claude', 'only_codex', 'human_test', 'testing')}
     for role in cfg['roles']:
         names.setdefault(role['label'], f'role: {role["role"]}')
         if role['mode'] == 'checker':

@@ -16,11 +16,26 @@ DEFAULT_LABELS = {
     'by_codex': 'codex',
     'only_claude': 'only claude',  # the owner's word: only this team may take the task
     'only_codex': 'only codex',
+    'human_test': 'human test',  # picked for a person's test before it is done (docs/HUMAN-TEST.md)
+    'testing': 'testing',  # handed to the tester, waits for the result
 }
 
 DEFAULT_TEXTS = {
     'take': 'taking this.',
     'ask': '{text}',
+    'handoff': ('for the human test, iteration {iteration} – @{tester}, please test it.\n\n**Build:** {build} (commit {commit})'
+                '\n\n{text}'),
+    'human_passed': 'human test passed – @{tester}, iteration {iteration}, build {build}. Closed.',
+    'human_failed': ('the tester @{tester} found problems in iteration {iteration} (above): back to the queue – fix them, '
+                     'then hand it over again with `agentq handoff`.'),
+    'human_blocked': 'the tester @{tester} could not test iteration {iteration} (the reason is above) – the owner decides.',
+    'human_reopened': ('reopened: this task is picked for a human test, and it closes only when the tester passes its latest '
+                       'iteration. Commit with `Refs #{number}`, not `Fixes`, and finish with `agentq handoff`.'),
+    'human_brief': ('Human test: this task is picked for a person\'s test. Commit with `Refs #{number}`, never `Fixes`. Instead '
+                    'of `agentq done`, finish with `agentq handoff {ref} --build "<where and which version to open>" '
+                    '--commit <sha> - <<\'EOF\'` … `EOF` and the scenarios, for a person who does not read code: where and '
+                    'which version to open, the starting state or data, what to click or do, what should happen, what '
+                    'else nearby to check. The task stays open until the tester\'s result; problems come back to you.'),
     'clear_now': ('Your conversation is {tokens} tokens (over {limit}): every step re-reads all of it. Do not run '
                   '`agentq next` now. As your very last step call clear_session with session_id "self" (load it with '
                   'ToolSearch if needed) – the dispatcher sends your next task to the clean session, and its brief '

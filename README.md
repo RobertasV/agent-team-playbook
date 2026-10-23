@@ -90,6 +90,7 @@ The commands agents use:
 | `health` | hourly timer | watcher alive, nothing stuck; problems go to one issue |
 | `nudge` · `held` | watcher, dispatcher | a reminder for a quiet session that holds a task |
 | `live role "command {sha}" [--when checked]` · `live --off` | install, on the owner's word | which role restarts your running copy: after GO, or after every check even with red tests (none: nothing is restarted, e.g. it runs elsewhere) |
+| `handoff N --build … -` | a programmer, on a task labelled `human test` | hands it to the human tester with the build and scenarios; the tester's result closes it or sends it back (docs/HUMAN-TEST.md) |
 | `tests per-task\|batched\|off` | any session, on the owner's word | each task runs the whole suite, or the watcher runs it every N tasks (red wakes the checker), or no tests (a quick read; the checker still checks) |
 | `scale role N` | any session, on the owner's word | how many sessions of a role work in parallel; missing ones to start, extra ones rest; 0 when Codex workers pull the role: they take all its tasks |
 | `init [--second] [--like <config>]` · `setup` · `role` · `link` · `roles` | install | config, labels, roles table, dispatcher folder; `--second`: the same project from another computer, `--like`: copy the team from its config |

@@ -130,6 +130,7 @@ Re-running setup creates nothing that exists: it finds the sessions from the con
 | `apps` | what is read from the Claude and Codex apps (below), messaging a Codex task |
 | `board` | which task a role takes next, who holds what, batches, tasks waiting for others |
 | `health` | the hourly check and its one issue |
+| `human` | the human test stage: `handoff`, the tester's results, picked tasks kept open (docs/HUMAN-TEST.md) |
 | `watch` | the watcher and the dispatcher's plan; waking Codex workers |
 | `brief` | a task as a worker reads it, screenshots as files |
 | `tasks` · `links` · `install` · `team` | the commands: a worker's, across linked projects, installing, the owner's words about the team |

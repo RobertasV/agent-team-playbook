@@ -18,7 +18,9 @@ The steps are the same in a Claude session and in a Codex task; only step 5 diff
 
 9. Ask: "Does a copy of the program run on this computer that should follow the checked version? Who restarts it, with what command?" Yes → `agentq live <role> "<command with {sha}>"` (usually the checker: it restarts only after GO, on the last green commit; nobody else restarts it). The owner tests on it too and wants every checked version → add `--when checked`: the checker restarts after every check on the commit it checked, red tests or not (not when it does not build or start). No – it runs on another machine, a server deploys itself, or nothing runs – skip; `agentq live --off` turns it off later.
 
-10. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
+10. Ask: "Does a person test some tasks by hand?" Yes → `"testers": ["<their GitHub login>"]` in the config, Write access for them on the repository, and `agentq setup` again (labels `human test`, `testing`). Only tasks labelled `human test` go to them – docs/HUMAN-TEST.md.
+
+11. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
 Conversation length: every step re-reads a session's whole conversation, so keep it short – put `{"autoCompactWindow": 200000}` in the project's `.claude/settings.json` (committed, so worktrees have it; the dispatcher's folder gets 120 000 from setup). Clearing instead (`clear_tokens` in the config) empties the window – only when the owner wants that.
 

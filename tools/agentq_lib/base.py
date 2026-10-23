@@ -21,6 +21,9 @@ ARROW = re.compile(r'\s*(?:→|->)\s*')
 REPO_FILE = re.compile(r'^https://(?:github\.com/([\w.-]+)/([\w.-]+)/(?:raw|blob)/([^/]+)/([^?#]+)'
                        r'|raw\.githubusercontent\.com/([\w.-]+)/([\w.-]+)/([^/]+)/([^?#]+))')
 
+# A file of a release, such as the margin-shots-N prerelease Margin keeps a project's screenshots in.
+RELEASE_FILE = re.compile(r'^https://github\.com/([\w.-]+)/([\w.-]+)/releases/download/([^/]+)/([^/?#]+)$')
+
 IMG = re.compile(r'<img\b[^>]*?\bsrc="([^"]+)"', re.I)
 
 

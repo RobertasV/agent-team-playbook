@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 
 from .system import tool
-from .base import BATCH_MARK, FULL, IMG, parse_time, REPO_FILE, ROUTE_MARK
+from .base import BATCH_MARK, FULL, IMG, parse_time, RELEASE_FILE, REPO_FILE, ROUTE_MARK
 from .github import gh_json, gh_pages, labels_of, login_of, resolve
 from .config import default_role, role_of_labels
 from .state import comment_key, load_delivered, load_state, mark_delivered
@@ -31,6 +31,16 @@ def repo_file(match):
     return run.stdout
 
 
+def release_file(match):
+    """A file of a (maybe private) repository's release, read through gh as the AI account."""
+    owner, repo, tag, name = match.groups()
+    run = subprocess.run([*(tool('gh') or ['gh']), 'release', 'download', urllib.parse.unquote(tag), '-R', f'{owner}/{repo}',
+                          '-p', urllib.parse.unquote(name), '-O', '-'], capture_output=True)
+    if run.returncode != 0:
+        raise OSError(f'the AI account cannot read {owner}/{repo} (the owner invites it with Read access)')
+    return run.stdout
+
+
 def download_shots(rendered, folder, first):
     """Uploaded images have short-lived signed links in GitHub's rendered HTML that need no login, even in private
     repos; an image linked from a repository is read through gh."""
@@ -39,9 +49,11 @@ def download_shots(rendered, folder, first):
         if urllib.parse.urlparse(src).scheme not in ('https', 'file'):  # file: only in tests
             continue
         try:
-            in_repo = REPO_FILE.match(src)
+            in_repo, in_release = REPO_FILE.match(src), RELEASE_FILE.match(src)
             if in_repo:
                 data, kind = repo_file(in_repo), ''
+            elif in_release:
+                data, kind = release_file(in_release), ''
             else:
                 with urllib.request.urlopen(src, timeout=30) as r:
                     data, kind = r.read(), (r.headers.get('Content-Type') or '').split(';')[0]

@@ -33,9 +33,10 @@ DEFAULT_TEXTS = {
                        'iteration. Commit with `Refs #{number}`, not `Fixes`, and finish with `agentq handoff`.'),
     'human_brief': ('Human test: this task is picked for a person\'s test. Commit with `Refs #{number}`, never `Fixes`. Instead '
                     'of `agentq done`, finish with `agentq handoff {ref} --build "<where and which version to open>" '
-                    '--commit <sha> - <<\'EOF\'` … `EOF` and the scenarios, for a person who does not read code: where and '
-                    'which version to open, the starting state or data, what to click or do, what should happen, what '
-                    'else nearby to check. The task stays open until the tester\'s result; problems come back to you.'),
+                    '--commit <sha> --shot <screen.png> … - <<\'EOF\'` … `EOF`: screenshots of how every changed screen should '
+                    'look (required – take them from the running app or the e2e tests), and the scenarios, for a person '
+                    'who does not read code: where and which version to open, the starting state or data, what to click '
+                    'or do, what should happen, what else nearby to check. The task stays open until the tester\'s result; problems come back to you.'),
     'clear_now': ('Your conversation is {tokens} tokens (over {limit}): every step re-reads all of it. Do not run '
                   '`agentq next` now. As your very last step call clear_session with session_id "self" (load it with '
                   'ToolSearch if needed) – the dispatcher sends your next task to the clean session, and its brief '

@@ -5,9 +5,11 @@ acts on each result once (a marker it leaves on the issue), so a restart never r
 the format Margin and agentq share."""
 
 import json
+import os
+import urllib.parse
 
 from .base import Fail, HANDOFF_MARK, PROCESSED_MARK, RESULT_MARK
-from .github import comment, gh, gh_pages, labels_of, login_of, relabel, resolve, view
+from .github import comment, gh, gh_json, gh_pages, labels_of, login_of, relabel, resolve, view
 from .config import holder
 from .state import update_state
 
@@ -62,6 +64,31 @@ def latest_result(cfg, issue, comments):
     return None, handoffs, processed
 
 
+SHOT_FILES = 1000  # GitHub keeps up to 1000 files in one release
+IMAGES = ('.png', '.jpg', '.jpeg', '.gif', '.webp')
+
+
+def upload_shots(repo, number, iteration, paths):
+    """The screenshots go where Margin keeps an issue's pictures – files of the repository's margin-shots-N
+    prerelease – so only people who see the project see them, and a brief downloads them. Returns their addresses."""
+    tags = [r.get('tagName', '') for r in gh_json('release', 'list', '-R', repo, '--limit', '100', '--json', 'tagName')]
+    numbers = sorted(int(t.split('-')[-1]) for t in tags if t.startswith('margin-shots-') and t.split('-')[-1].isdigit())
+    n = numbers[-1] if numbers else 0
+    if n and len(gh_json('release', 'view', f'margin-shots-{n}', '-R', repo, '--json', 'assets').get('assets') or []) \
+            + len(paths) > SHOT_FILES:
+        n += 1
+    if not n or f'margin-shots-{n}' not in tags:
+        n = n or 1
+        gh('release', 'create', f'margin-shots-{n}', '-R', repo, '--prerelease', '--latest=false',
+           '--title', f'Margin screenshots {n}', '--notes', 'Screenshots attached to issues.')
+    tag, urls = f'margin-shots-{n}', []
+    for k, path in enumerate(paths, 1):
+        name = f'{number}-test-{iteration}-{k}{os.path.splitext(path)[1].lower()}'
+        gh('release', 'upload', tag, f'{path}#{name}', '-R', repo, '--clobber')
+        urls.append(f'https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(name)}')
+    return urls
+
+
 def cmd_handoff(cfg, opts):
     """The programmer hands a picked task to the human tester: the build to test and the scenarios, one iteration
     more. The task stays open and leaves the queue until the tester's result."""
@@ -78,12 +105,20 @@ def cmd_handoff(cfg, opts):
         raise Fail(f'{tester} is not one of the testers ({", ".join(cfg["testers"])})')
     if not (opts.build or '').strip() or not (opts.text or '').strip():
         raise Fail('a handoff needs --build (where and which version to open) and the scenarios')
+    shots = [os.path.expanduser(s) for s in opts.shot or []]
+    if not shots:
+        raise Fail('a handoff needs screenshots of how the changed screens should look: --shot <file.png>, one per screen')
+    for path in shots:
+        if not os.path.isfile(path) or not path.lower().endswith(IMAGES):
+            raise Fail(f'{path}: not an image file ({", ".join(IMAGES)})')
     comments = gh_pages('api', f'repos/{repo}/issues/{number}/comments', '--paginate')
     handoffs, _, _ = test_history(cfg, comments)
     iteration = len(handoffs) + 1
+    urls = upload_shots(repo, number, iteration, shots)
+    pictures = '\n\n**How it should look:**\n\n' + '\n'.join(f'![screen {k}]({u})' for k, u in enumerate(urls, 1))
     data = {'iteration': iteration, 'build': opts.build.strip(), 'commit': (opts.commit or '').strip(), 'tester': tester}
     text = cfg['texts']['handoff'].format(tester=tester, iteration=iteration, build=data['build'],
-                                          commit=data['commit'] or '-', text=opts.text.strip())
+                                          commit=data['commit'] or '-', text=opts.text.strip()) + pictures
     comment(cfg, repo, number, f"{text}\n<!-- agentq:human-test {json.dumps(data, ensure_ascii=False)} -->",
             holder(cfg, issue))
     relabel(repo, number, add=[labels['testing']], remove=[n for n in (labels['working'],) if n in names])

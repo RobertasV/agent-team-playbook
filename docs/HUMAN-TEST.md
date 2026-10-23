@@ -23,7 +23,10 @@ coded → testing (iteration N) → passed: closed
 ```
 
 1. **Hand-off** – the programmer, instead of `agentq done`:
-   `agentq handoff <issue> --build "<where and which version to open>" --commit <sha> - <<'EOF'` scenarios `EOF`.
+   `agentq handoff <issue> --build "<where and which version to open>" --commit <sha> --shot <screen.png> … - <<'EOF'` scenarios `EOF`.
+   Screenshots of how every changed screen should look are required (`--shot`, one per screen): agentq uploads them
+   as files of the repository's `margin-shots-N` prerelease – where Margin keeps an issue's pictures – and shows them
+   in the comment, so the tester compares the screen with them.
    agentq posts one comment with the scenarios and the build, adds `testing`, removes the working label, assigns the
    tester (`--tester`, default the config's first) and frees the programmer for other work. The comment carries:
 

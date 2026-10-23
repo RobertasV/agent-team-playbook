@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.2 – 2026-10-23
+- `agentq handoff` requires screenshots of how every changed screen should look (`--shot`, one per screen): they go up as files of the repository's `margin-shots-N` prerelease, where Margin keeps an issue's pictures, and show in the hand-off comment for the tester to compare with.
+
 ## 0.4.1 – 2026-10-23
 - Every role's default effort is `medium` (was `xhigh`, `max` for hard issues), also for Codex workers, and INSTALL says so: a new install on another computer started its programmers at extra high. Higher only on the owner's word, per role.
 

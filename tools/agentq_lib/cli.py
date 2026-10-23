@@ -41,6 +41,8 @@ def main(argv=None):
     ho2.add_argument('--build', required=True, help='where and which version to open (a link, a version, an installer)')
     ho2.add_argument('--commit', help='the commit that build is made of')
     ho2.add_argument('--tester', help="one of the config's testers (default: the first)")
+    ho2.add_argument('--shot', action='append', help='a screenshot of how a changed screen should look (required; '
+                                                     'one per screen, repeat the option)')
     a = sub.add_parser('ask', help='ask the owner; the issue leaves the queue')
     a.add_argument('issue')
     a.add_argument('text')

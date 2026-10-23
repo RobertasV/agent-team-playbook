@@ -72,6 +72,12 @@ elif args[0] == 'api' and '/contents/' in args[1]:
 elif args[0] == 'api':
     listing = args[1].split('?')[0].endswith(('/comments', '/events'))
     print(json.dumps(data.get('api', {}).get(args[1], [] if listing else {})))
+elif args[:2] == ['release', 'list']:
+    print(json.dumps(repo.get('releases', [])))
+elif args[:2] == ['release', 'view']:
+    print(json.dumps({'assets': repo.get('assets', {}).get(args[2], [])}))
+elif args[:2] in (['release', 'create'], ['release', 'upload']):
+    pass
 else:
     print(f'fake gh: unexpected {args}', file=sys.stderr)
     sys.exit(2)

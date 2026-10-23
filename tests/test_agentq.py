@@ -971,8 +971,15 @@ class TeamTest(Base):
         run = self.run_tool('done', '7', 'fixed', ok=False)  # a picked task is not done when its code is
         self.assertIn('picked for a human test: not closed', run.stderr)
         self.assertEqual(self.calls(['issue', 'close']), [])
+        shot = os.path.join(self.dir.name, 'cart.png')
+        open(shot, 'wb').close()
+        run = self.run_tool('handoff', '7', 'Open the cart.', '--build', 'v1.2-rc1', ok=False)
+        self.assertIn('needs screenshots', run.stderr)  # how to test includes how it should look
         self.run_tool('handoff', '7', '1. Open the cart. 2. Add two items. Expect: total 20.', '--build', 'v1.2-rc1',
-                      '--commit', 'abc123')
+                      '--commit', 'abc123', '--shot', shot)
+        self.assertIn(['release', 'create', 'margin-shots-1'], [c[:3] for c in self.calls(['release', 'create'])])
+        self.assertIn(f'![screen 1](https://github.com/{REPO}/releases/download/margin-shots-1/7-test-1-1.png)',
+                      self.body(self.calls(['issue', 'comment'])[-1]))
         said_ = self.body(self.calls(['issue', 'comment'])[-1])
         self.assertIn('iteration 1', said_)
         self.assertIn('<!-- agentq:human-test {"iteration": 1, "build": "v1.2-rc1", "commit": "abc123", "tester": "tina"} -->', said_)
@@ -998,7 +1005,7 @@ class TeamTest(Base):
         before = len(self.calls(['issue', 'comment']))
         board_says(now='2026-01-02T12:05:00Z')  # the same result read again (a restarted watcher): nothing twice
         self.assertEqual(len(self.calls(['issue', 'comment'])), before)
-        self.run_tool('handoff', '7', 'Same steps.', '--build', 'v1.2-rc2', now='2026-01-02T12:06:00Z')
+        self.run_tool('handoff', '7', 'Same steps.', '--build', 'v1.2-rc2', '--shot', shot, now='2026-01-02T12:06:00Z')
         self.assertIn('"iteration": 2', self.body(self.calls(['issue', 'comment'])[-1]))
         board_says(('tina', 'old one ' + result(1, 'pass'), '2026-01-02T12:07:00Z'), now='2026-01-02T12:08:00Z')
         self.assertEqual(self.calls(['issue', 'close']), [])  # a result for iteration 1 does not pass iteration 2

@@ -229,9 +229,9 @@ def clear_if_long(cfg):
     """A Claude worker that finished a task with a long conversation clears it instead of waiting for the next task:
     every step re-reads the whole conversation, and the next task's brief brings all it needs. The dispatcher sends the
     next task to the clean session."""
-    session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if running_in() == 'claude' else None
+    session = os.environ.get('CLAUDE_CODE_HOST_SESSION_ID') if running_in() == 'claude' and cfg['clear_tokens'] else None
     size = context_tokens(cfg, session) if session else None
-    if size is None or size < cfg['clear_tokens']:
+    if not cfg['clear_tokens'] or size is None or size < cfg['clear_tokens']:
         return
     print(cfg['texts']['clear_now'].format(tokens=f'{size // 1000}k', limit=f"{cfg['clear_tokens'] // 1000}k"))
 

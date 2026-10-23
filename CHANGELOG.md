@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.15 – 2026-10-23
+- Clearing a long conversation is off by default (`clear_tokens`, 0): an owner who finds an emptied window disturbing keeps conversations short with the project's `.claude/settings.json` `"autoCompactWindow": 200000` instead – the window keeps a summary. INSTALL.md says so.
+
 ## 0.3.14 – 2026-10-23
 - A Claude worker that finishes a task with a conversation over `clear_tokens` (200 000) is told to clear it (`clear_session` "self") instead of waiting for its next task; the dispatcher sends that task to the clean session, and its brief brings everything. Every step re-reads the whole conversation: four programmers with 400–530k-token conversations read about 2.6 billion tokens in seven hours, against about 36 million of new work.
 - The dispatcher's folder gets `.claude/settings.json` with `autoCompactWindow` (`dispatcher.compact_tokens`, 120 000): it needs no memory between plans, and its conversation had reached about 690k tokens.

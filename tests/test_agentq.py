@@ -429,6 +429,7 @@ class TeamTest(Base):
 
     def test_a_worker_with_a_long_conversation_clears_it_when_it_finishes(self):
         self.data({REPO: {'open': [issue(7, 'Fix', ['prog', 'doing'])]}})
+        self.config_change(clear_tokens=200000)  # off unless the owner chose clearing over compaction
         self.session('local_p', T0)
         tx = os.path.join(self.dir.name, 'tx', '-proj', 'cli-local_p.jsonl')
 

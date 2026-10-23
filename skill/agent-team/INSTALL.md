@@ -20,6 +20,8 @@ The steps are the same in a Claude session and in a Codex task; only step 5 diff
 
 10. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
+Conversation length: every step re-reads a session's whole conversation, so keep it short – put `{"autoCompactWindow": 200000}` in the project's `.claude/settings.json` (committed, so worktrees have it; the dispatcher's folder gets 120 000 from setup). Clearing instead (`clear_tokens` in the config) empties the window – only when the owner wants that.
+
 Models: every role runs on the strongest model at extra-high effort (`xhigh`; `max` for a *hard* issue); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. Codex workers start on the config's `codex_model` (a role's own `--codex-model` wins); set it when the owner names the Codex model, e.g. `"codex_model": "<id from ~/.codex/models_cache.json>"`. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
 
 Re-running install creates nothing that exists (but an install run in Codex still does the Codex part of step 5): `agentq setup` shows the roles table; start sessions marked MISSING or archived again, record them and move them into the sidebar group; after a reboot or an app restart send this project's dispatcher (its id is in the table) "Start the watcher".

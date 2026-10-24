@@ -22,7 +22,7 @@ The steps are the same in a Claude session and in a Codex task; only step 5 diff
 
 11. When the team runs in another project too, ask: "Share tasks between the projects?" Yes → in each project `agentq link other/repo "what belongs there"`.
 
-Conversation length: every step re-reads a session's whole conversation, so keep it short – put `{"autoCompactWindow": 200000}` in the project's `.claude/settings.json` (committed, so worktrees have it; the dispatcher's folder gets 120 000 from setup). Clearing instead (`clear_tokens` in the config) empties the window – only when the owner wants that.
+Conversation length: every step re-reads a session's whole conversation, so a long one costs more – but compacting early (`autoCompactWindow` in the project's `.claude/settings.json`) made programmers code worse in one team, so leave the app's default unless the owner asks; `dispatcher.compact_tokens` in the config compacts only the dispatcher. Clearing (`clear_tokens`) empties the window – only when the owner wants that.
 
 Models: every role runs on the strongest model at `medium` effort – higher only on the owner's word (a higher effort re-reads and thinks more on every step, and costs several times more); only the dispatcher runs on a mid model at low effort (the cheapest kept doubting its plans). Use ids from the app's model picker. Codex workers start on the config's `codex_model` (a role's own `--codex-model` wins); set it when the owner names the Codex model, e.g. `"codex_model": "<id from ~/.codex/models_cache.json>"`. The dispatcher switches a session's model or effort per task (a *hard* issue, a release check); without asking the owner only in bypass permission mode – otherwise leave `hard_effort` and `release_model` empty.
 

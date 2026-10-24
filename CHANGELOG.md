@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.3 – 2026-10-24
+- Early compaction is the owner's choice, not a default: `setup` writes the dispatcher's `autoCompactWindow` only with `dispatcher.compact_tokens` in the config, and INSTALL no longer suggests 200 000 for projects – compacting programmers at 200k made them code worse.
+
 ## 0.4.2 – 2026-10-23
 - `agentq handoff` requires screenshots of how every changed screen should look (`--shot`, one per screen): they go up as files of the repository's `margin-shots-N` prerelease, where Margin keeps an issue's pictures, and show in the hand-off comment for the tester to compare with.
 

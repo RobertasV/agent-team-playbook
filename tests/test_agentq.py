@@ -445,6 +445,7 @@ class TeamTest(Base):
         self.assertIn('Your conversation is 450k tokens (over 200k)', out)
         self.assertIn('call clear_session with session_id "self"', out)
         folder = os.path.join(self.dir.name, 'disp')
+        self.config_change(dispatcher={'folder': folder, 'session': 'local_x', 'compact_tokens': 120000})
         from agentq_lib import config, install
         install.install_dispatcher(config.load_config(self.config), folder)
         with open(os.path.join(folder, '.claude', 'settings.json')) as f:
